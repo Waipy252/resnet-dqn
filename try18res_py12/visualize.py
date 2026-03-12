@@ -90,6 +90,9 @@ def evaluate_all_models(ticker="^N225", start="2000-01-01", end="2010-01-01"):
 
             while not done and step_count < max_steps:
                 try:
+                    if obs is None:
+                        print("Observation is None, stopping evaluation")
+                        break
                     action, _ = model.predict(obs, deterministic=True)
                     action_history.append(int(action))
                     obs, reward, done, info = test_env.step(action)
@@ -588,7 +591,7 @@ def create_equity_curves_with_ensemble(
 
 # Gradioインターフェース
 with gr.Blocks(
-    title="DQN Model Performance Visualizer", theme=gr.themes.Soft()
+    title="DQN Model Performance Visualizer"
 ) as demo:
     gr.Markdown(
         """
@@ -715,4 +718,4 @@ with gr.Blocks(
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("GRADIO_SERVER_PORT", 7860))
-    demo.launch(server_name="0.0.0.0", server_port=port, share=False, show_error=True)
+    demo.launch(server_name="0.0.0.0", server_port=port, share=False, show_error=True, theme="soft")

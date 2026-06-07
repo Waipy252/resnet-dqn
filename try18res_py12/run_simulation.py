@@ -46,7 +46,7 @@ def run_simulation_try18res(price, end_day, vix, jpy, usr):
         results = []
 
         # 各モデルで評価
-        for i in range(200000, 420001, 10000):
+        for i in range(200000, 200001, 10000):
             obs = test_env.reset()
             done = False
             action_history = []

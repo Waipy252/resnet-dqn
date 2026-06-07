@@ -70,7 +70,7 @@ def evaluate_all_models(ticker="^N225", start="2000-01-01", end="2010-01-01"):
 
     results = []
 
-    for i in range(200000, 270001, 10000):
+    for i in range(200000, 200001, 10000):
         try:
             print(f"Evaluating Step {i}...")
 
@@ -129,8 +129,9 @@ def evaluate_all_models(ticker="^N225", start="2000-01-01", end="2010-01-01"):
                 "long_actions": action_counter.get(0, 0),
                 "flat_actions": action_counter.get(1, 0),
                 "short_actions": action_counter.get(2, 0),
+                "last_action": action_history[-1] if action_history else None,
                 "equity_curve": equity_curve,
-                "action_history": action_history,  # アクション履歴を追加
+                "action_history": action_history,
             }
 
             results.append(result)
@@ -424,6 +425,7 @@ def create_ensemble_result(
         "long_actions": action_counter.get(0, 0),
         "flat_actions": action_counter.get(1, 0),
         "short_actions": action_counter.get(2, 0),
+        "last_action": ensemble_actions[-1] if ensemble_actions else None,
     }
 
     return equity_curve, ensemble_metrics
@@ -556,7 +558,13 @@ def create_equity_curves_with_ensemble(
     # アンサンブルの性能指標をテキスト形式で表示
     ensemble_text = ""
     if ensemble_metrics:
+        action_map = {0: "🟢 買い (Long)", 1: "⚪ 待ち (Flat)", 2: "🔴 売り (Short)"}
+        last_action_label = action_map.get(ensemble_metrics.get("last_action"), "不明")
         ensemble_text = f"""
+## 📌 最後のアクション: **{last_action_label}**
+
+---
+
 ## 🎯 アンサンブル（多数決）性能指標
 
 - **年利**: {ensemble_metrics['annual_return']:.2f}%

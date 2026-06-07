@@ -39,12 +39,12 @@ with gr.Blocks(title="日経平均株価シミュレーション") as demo:
 
     with gr.Row():
         with gr.Column(scale=1):
-            price_input = gr.Number(label="株価", value=44000)
+            price_input = gr.Number(label="株価", value=63000)
             volume_input = gr.Number(label="出来高", value=130000000)
-            end_day_input = gr.Textbox(label="日付 (YYYY-MM-DD)", value="2025-10-01")
+            end_day_input = gr.Textbox(label="日付 (YYYY-MM-DD)", value="2026-06-06")
             vix_input = gr.Number(label="VIX指数", value=15.21)
-            jpy_input = gr.Number(label="日本10年債利回り", value=1.6)
-            usr_input = gr.Number(label="米国10年債利回り", value=4.33)
+            jpy_input = gr.Number(label="日本10年債利回り", value=2.6)
+            usr_input = gr.Number(label="米国10年債利回り", value=4.53)
             submit_btn = gr.Button("シミュレーション実行", variant="primary")
 
         with gr.Column(scale=2):

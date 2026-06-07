@@ -26,7 +26,7 @@ def run_simulation_try18res(price, end_day, vix, jpy, usr):
         manual_data.set_index("Date", inplace=True)
 
         # バックテスト設定
-        start = "2023-01-01"
+        start = "2025-01-01"
         test_data = generate_env_data(
             start, end_day, ticker="^N225", manual_data=manual_data
         )

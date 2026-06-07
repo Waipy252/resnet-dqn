@@ -44,6 +44,9 @@ def build_model(env, device, features_extractor_class, tensorboard_log=config.TE
         # n_quantiles は QRDQNPolicy のパラメータなので policy_kwargs に入れる
         policy_kwargs["n_quantiles"] = config.N_QUANTILES
 
+    # optimize_memory_usage=True は handle_timeout_termination=True と併用不可（SB3制約）
+    replay_buffer_kwargs = {"handle_timeout_termination": False} if optimize_memory_usage else None
+
     return AlgoClass(
         "MlpPolicy",
         env,
@@ -51,6 +54,7 @@ def build_model(env, device, features_extractor_class, tensorboard_log=config.TE
         learning_rate=config.LEARNING_RATE,
         buffer_size=buffer_size,
         optimize_memory_usage=optimize_memory_usage,
+        replay_buffer_kwargs=replay_buffer_kwargs,
         batch_size=config.BATCH_SIZE,
         train_freq=config.TRAIN_FREQ,
         gradient_steps=config.GRADIENT_STEPS,

@@ -6,13 +6,13 @@ import gymnasium as gym
 from gymnasium import spaces
 import torch
 import torch.nn as nn
-from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.utils import set_random_seed
 
 import config
+from algo import build_model
 
 
 class Action(IntEnum):
@@ -439,31 +439,9 @@ if __name__ == "__main__":
 
     train_env = DummyVecEnv([make_env])
 
-    policy_kwargs = dict(
-        features_extractor_class=ResNetFeatures,
-        features_extractor_kwargs=dict(
-            features_dim=config.FEATURES_DIM,
-            num_blocks=config.NUM_BLOCKS,
-        ),
-    )
-
-    model = DQN(
-        "MlpPolicy",
-        train_env,
-        policy_kwargs=policy_kwargs,
-        exploration_final_eps=config.EXPLORATION_FINAL_EPS,
-        exploration_fraction=config.EXPLORATION_FRACTION,
-        learning_rate=config.LEARNING_RATE,
-        buffer_size=config.BUFFER_SIZE,   # F-2: メモリ警告を根本解消
-        batch_size=config.BATCH_SIZE,     # F-5: GPU を使い切る
-        train_freq=config.TRAIN_FREQ,
-        gradient_steps=config.GRADIENT_STEPS,
-        seed=config.SEED,                 # C-2
-        tensorboard_log=config.TENSORBOARD_LOG,  # C-3
-        verbose=1,
-        device=device,
-    )
-    print("新たにモデルを作成しました。")
+    # G-1: config.ALGO に応じて QR-DQN / DQN を構築（env・ResNet・報酬は共通）
+    model = build_model(train_env, device, features_extractor_class=ResNetFeatures)
+    print(f"新たにモデルを作成しました（algo={config.ALGO}）。")
 
     # チェックポイントコールバックの作成
     checkpoint_callback = CheckpointCallback(

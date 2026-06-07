@@ -1,7 +1,7 @@
 import pandas as pd
-from stable_baselines3 import DQN
 from calc_performance import calculate_performance_metrics, compute_sharpe_ratio
 import config
+from algo import get_algo_class
 
 
 def run_simulation_try18res(price, end_day, vix, jpy, usr):
@@ -53,7 +53,7 @@ def run_simulation_try18res(price, end_day, vix, jpy, usr):
 
             num_steps = i
             try:
-                model = DQN.load(
+                model = get_algo_class().load(
                     f"./{config.model_name(num_steps)}.zip",
                     env=test_env,
                 )

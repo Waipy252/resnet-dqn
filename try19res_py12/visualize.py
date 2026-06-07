@@ -5,12 +5,12 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
-from stable_baselines3 import DQN
 from main import NikkeiEnv
 from data import generate_env_data
 from calc_performance import compute_sharpe_ratio, calculate_performance_metrics
 from collections import Counter
 import config
+from algo import get_algo_class
 
 
 def clean_data_for_plot(data):
@@ -34,16 +34,15 @@ def clean_data_for_plot(data):
 
 
 def load_model_safely(model_path, env):
+    AlgoClass = get_algo_class()  # G-1: config.ALGO に応じて QR-DQN / DQN
     try:
-        model = DQN.load(
+        model = AlgoClass.load(
             model_path,
             env=None,
             device="cpu",
             custom_objects={
                 "lr_schedule": None,
                 "exploration_schedule": None,
-                "batch_norm_stats": None,
-                "batch_norm_stats_target": None,
                 "replay_buffer": None,
             },
         )
@@ -53,7 +52,7 @@ def load_model_safely(model_path, env):
         return model
     except Exception as e:
         print(f"モデルロードエラー: {e}")
-        return DQN("MlpPolicy", env, verbose=0, device="cpu")
+        return AlgoClass("MlpPolicy", env, verbose=0, device="cpu")
 
 
 def evaluate_all_models(ticker="^N225", start="2000-01-01", end="2010-01-01"):

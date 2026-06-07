@@ -2,11 +2,11 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import warnings
 from collections import Counter
-from stable_baselines3 import DQN
 from main import NikkeiEnv
 from data import generate_env_data
 from calc_performance import compute_sharpe_ratio, calculate_performance_metrics
 import config
+from algo import get_algo_class
 import torch
 import os
 
@@ -38,20 +38,18 @@ manual_data.set_index("Date", inplace=True)
 
 
 def load_model_safely(model_path, env):
+    AlgoClass = get_algo_class()  # G-1: config.ALGO に応じて QR-DQN / DQN
     try:
-        # まず env なしで CPU に強制ロード、BatchNorm 統計などは None に置換
-        model = DQN.load(
+        # まず env なしで CPU に強制ロード
+        model = AlgoClass.load(
             model_path,
             env=None,
             device="cpu",
             custom_objects={
                 "lr_schedule": None,
                 "exploration_schedule": None,
-                "batch_norm_stats": None,  # 追加
-                "batch_norm_stats_target": None,  # 追加
                 "replay_buffer": None,  # もし含まれていても無視
             },
-            # SB3 の新しめの版なら有効: print_system_info=True,
         )
         # 念のため CPU に固定し eval モードへ
         model.policy.to("cpu")
@@ -62,7 +60,7 @@ def load_model_safely(model_path, env):
     except Exception as e:
         print(f"モデルロードエラー: {e}")
         # ここに来るのは zip の破損やバージョン不整合の可能性大
-        return DQN("MlpPolicy", env, verbose=0, device="cpu")
+        return AlgoClass("MlpPolicy", env, verbose=0, device="cpu")
 
 
 # ──────────────────────────────

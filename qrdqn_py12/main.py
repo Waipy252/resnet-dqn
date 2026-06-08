@@ -579,8 +579,19 @@ def save_best_or_last(model, best_dir, out_path):
 
 
 if __name__ == "__main__":
-    # C-2: 再現性のためシード固定
-    set_random_seed(config.SEED)
+    import os
+    import sys
+
+    # C-2: 再現性のためシード固定。ただしアンサンブル用に実行ごとに変えられるよう、
+    # 引数 or 環境変数 SEED で上書き可（例: `python main.py 3` / `SEED=3 python main.py`）。
+    # 固定のままだと毎回ビット単位で同一モデルになり、複数runしても意味がない。
+    seed = config.SEED
+    if len(sys.argv) > 1:
+        seed = int(sys.argv[1])
+    elif os.environ.get("SEED"):
+        seed = int(os.environ["SEED"])
+    set_random_seed(seed)
+    print(f"seed = {seed}")
 
     print("データ準備中（学習/検証分割）...")
     train_df, val_df = prepare_train_val_data()
@@ -598,13 +609,16 @@ if __name__ == "__main__":
         train_env, device,
         features_extractor_class=extractor_cls,
         features_extractor_kwargs=extractor_kwargs,
+        seed=seed,
     )
-    print(f"新たにモデルを作成しました（algo={config.ALGO}, extractor={config.FEATURES_EXTRACTOR}）。")
+    print(f"新たにモデルを作成しました（algo={config.ALGO}, extractor={config.FEATURES_EXTRACTOR}, seed={seed}）。")
 
+    # シード別に保存先を分け、複数runが互いに上書きしないようにする
+    prefix = f"{config.model_name()}_seed{seed}"
     checkpoint_callback = CheckpointCallback(
-        save_freq=10000, save_path=config.MODEL_DIR, name_prefix=config.model_name()
+        save_freq=10000, save_path=config.MODEL_DIR, name_prefix=prefix
     )
-    best_dir = "best"
+    best_dir = f"best_seed{seed}"
     eval_callback = make_eval_callback(val_df, best_dir)  # 検証スコアで早期停止
 
     print("エージェントの学習開始（検証スコアで早期停止）...")
@@ -614,4 +628,4 @@ if __name__ == "__main__":
         progress_bar=True,
     )
     print("学習完了！")
-    save_best_or_last(model, best_dir, config.model_name())
+    save_best_or_last(model, best_dir, prefix)

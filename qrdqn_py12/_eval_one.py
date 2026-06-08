@@ -5,6 +5,7 @@
 """
 import glob
 import os
+import re
 import warnings
 
 import pandas as pd
@@ -44,12 +45,14 @@ AlgoClass = get_algo_class()
 print("algo =", AlgoClass.__name__, "| reward =", config.REWARD_TYPE)
 
 def _steps(p):
-    """ファイル名から識別ラベル。命名規約 ..._<steps>_steps.zip なら steps(int)、
-    リネーム済みzipは ..._<start>_<end>_ 以降の判別部分（無ければファイル名）を返す。"""
+    """ファイル名から識別ラベル。seed があれば "sN:steps" 形式で区別する
+    （複数シードで同じ step 番号が重複して見分けがつかなくなるのを防ぐ）。"""
     stem = os.path.splitext(os.path.basename(p))[0]
+    m = re.search(r"seed(\d+)", stem)
+    tag = f"s{m.group(1)}:" if m else ""
     parts = stem.rsplit("_", 2)
     if len(parts) == 3 and parts[2] == "steps" and parts[1].isdigit():
-        return int(parts[1])
+        return f"{tag}{int(parts[1])}" if tag else int(parts[1])
     prefix = f"nikkei_cp_{config.TRAIN_START}_{config.TRAIN_END}_"
     return stem[len(prefix):] if stem.startswith(prefix) else stem
 

@@ -1,5 +1,6 @@
 import os
 import glob
+import re
 import gradio as gr
 import pandas as pd
 import numpy as np
@@ -39,11 +40,14 @@ def _steps_from_path(path):
 
     命名規約 nikkei_cp_..._<steps>_steps.zip なら steps(int) を、
     それ以外（リネーム済みベストモデル等）は拡張子なしのファイル名を返す。
+    seed があれば "sN:steps" 形式にして複数シードを区別する。
     """
     stem = os.path.splitext(os.path.basename(path))[0]
+    m = re.search(r"seed(\d+)", stem)
+    tag = f"s{m.group(1)}:" if m else ""
     parts = stem.rsplit("_", 2)
     if len(parts) == 3 and parts[2] == "steps" and parts[1].isdigit():
-        return int(parts[1])
+        return f"{tag}{int(parts[1])}" if tag else int(parts[1])
     return stem
 
 

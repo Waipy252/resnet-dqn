@@ -387,64 +387,134 @@ class ResidualBlock(nn.Module):
 
         return out
 
+
 # ──────────────────────────────
-# 2. 改善版 Transformer を用いた特徴抽出器
-class TransformerFeatures(BaseFeaturesExtractor):
+# 1-b. 代替の特徴抽出器（G-2: config.FEATURES_EXTRACTOR で切替）
+class _Chomp1d(nn.Module):
+    """因果的畳み込みで右側にはみ出たパディングを切り落とす（未来を見ないため）。"""
+
+    def __init__(self, chomp_size):
+        super().__init__()
+        self.chomp_size = chomp_size
+
+    def forward(self, x):
+        return x[:, :, : -self.chomp_size].contiguous() if self.chomp_size > 0 else x
+
+
+class _TCNBlock(nn.Module):
+    """Dilated Causal Conv の残差ブロック（左パディング＋Chomp で因果性を保つ）。"""
+
+    def __init__(self, channels, kernel_size, dilation):
+        super().__init__()
+        pad = (kernel_size - 1) * dilation
+        self.conv1 = nn.Conv1d(channels, channels, kernel_size, padding=pad, dilation=dilation)
+        self.chomp1 = _Chomp1d(pad)
+        self.gn1 = nn.GroupNorm(_gn_groups(channels), channels)
+        self.conv2 = nn.Conv1d(channels, channels, kernel_size, padding=pad, dilation=dilation)
+        self.chomp2 = _Chomp1d(pad)
+        self.gn2 = nn.GroupNorm(_gn_groups(channels), channels)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        out = self.relu(self.gn1(self.chomp1(self.conv1(x))))
+        out = self.relu(self.gn2(self.chomp2(self.conv2(out))))
+        return self.relu(out + x)
+
+
+class TCNFeatures(BaseFeaturesExtractor):
+    """Temporal Convolutional Network（Dilated Causal Conv）特徴抽出器。
+
+    dilation を 2^i で増やし、少ない層で長期依存を因果的にカバーする。
     """
-    カスタム特徴抽出器：入力時系列 (window_size × input_dim) を線形変換し、
-    学習可能な位置エンコーディングを加えた上で Transformer Encoder で変換し、
-    時系列方向に平均プーリングして最終特徴量 (model_dim 次元) を得る。
-    """
 
-    def __init__(
-        self,
-        observation_space: gym.spaces.Box,
-        model_dim=128,
-        nhead=4,
-        num_layers=2,
-        dropout_rate=0.1,
-    ):
-        # 最終的な特徴次元は model_dim
-        super(TransformerFeatures, self).__init__(
-            observation_space, features_dim=model_dim
+    def __init__(self, observation_space, features_dim=128, num_blocks=3, kernel_size=3):
+        super().__init__(observation_space, features_dim=features_dim)
+        self.input_dim = observation_space.shape[1]
+        self.input_projection = nn.Sequential(
+            nn.Linear(self.input_dim, features_dim), nn.ReLU()
         )
-        self.window_size = observation_space.shape[0]  # 時系列長
-        self.input_dim = observation_space.shape[
-            1
-        ]  # 入力特徴数（例: 終値と出来高の場合は2）
-        self.model_dim = model_dim
-
-        # 入力を model_dim 次元に射影
-        self.input_proj = nn.Linear(self.input_dim, model_dim)
-        # 学習可能な位置エンコーディング（初期化に Xavier Uniform を使用）
-        self.pos_emb = nn.Parameter(torch.zeros(1, self.window_size, model_dim))
-        nn.init.xavier_uniform_(self.pos_emb)
-
-        # Transformer Encoder の定義（dropout_rate を導入）
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=model_dim, nhead=nhead, dropout=dropout_rate
+        self.blocks = nn.ModuleList(
+            [_TCNBlock(features_dim, kernel_size, 2 ** i) for i in range(num_blocks)]
         )
-        self.transformer_encoder = nn.TransformerEncoder(
-            encoder_layer, num_layers=num_layers
-        )
-
-        # 時系列方向での平均プーリング（出力 shape: (batch, model_dim)）
-        self.pool = nn.AdaptiveAvgPool1d(1)
 
     def forward(self, observations):
-        # observations の shape: (batch, window_size, input_dim)
-        x = self.input_proj(observations)  # → (batch, window_size, model_dim)
-        x = x + self.pos_emb  # 位置エンコーディングの加算
-        x = x.transpose(0, 1)  # Transformer 用に (window_size, batch, model_dim) に変形
-        x = self.transformer_encoder(x)  # Transformer Encoder 層
-        x = x.transpose(0, 1)  # → (batch, window_size, model_dim)
-        x = x.transpose(1, 2)  # → (batch, model_dim, window_size) に変形して
-        x = self.pool(x).squeeze(-1)  # 時系列方向で平均プーリング → (batch, model_dim)
-        return x
+        x = self.input_projection(observations)  # (batch, window, features_dim)
+        x = x.transpose(1, 2)                     # (batch, features_dim, window)
+        for block in self.blocks:
+            x = block(x)
+        return x[:, :, -1]                        # 最後の時刻（因果的に全履歴を集約済み）
+
+
+class RNNFeatures(BaseFeaturesExtractor):
+    """LSTM / GRU 特徴抽出器。ウィンドウを時系列として処理し最終隠れ状態を返す。"""
+
+    def __init__(self, observation_space, features_dim=128, num_layers=1, rnn_type="lstm"):
+        super().__init__(observation_space, features_dim=features_dim)
+        self.input_dim = observation_space.shape[1]
+        rnn_cls = nn.LSTM if rnn_type.lower() == "lstm" else nn.GRU
+        self.rnn = rnn_cls(
+            self.input_dim, features_dim, num_layers=num_layers, batch_first=True
+        )
+
+    def forward(self, observations):
+        out, _ = self.rnn(observations)  # (batch, window, features_dim)
+        return out[:, -1, :]              # 最後の時刻の隠れ状態
+
+
+class MLPFeatures(BaseFeaturesExtractor):
+    """薄いMLP（ベースライン）。ウィンドウを平坦化して全結合で処理。"""
+
+    def __init__(self, observation_space, features_dim=128, hidden=128):
+        super().__init__(observation_space, features_dim=features_dim)
+        window_size, input_dim = observation_space.shape
+        self.net = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(window_size * input_dim, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, features_dim),
+            nn.ReLU(),
+        )
+
+    def forward(self, observations):
+        return self.net(observations)
+
+
+# 名前 → クラスの対応（config.FEATURES_EXTRACTOR で選ぶ）
+FEATURES_EXTRACTORS = {
+    "resnet": ResNetFeatures,
+    "tcn": TCNFeatures,
+    "lstm": RNNFeatures,
+    "gru": RNNFeatures,
+    "mlp": MLPFeatures,
+}
+
+
+def make_features_extractor():
+    """config.FEATURES_EXTRACTOR に応じて (クラス, kwargs) を返す（G-2）。
+
+    アーキごとに必要な引数が違うので、ここで kwargs まで組み立てて
+    build_model にそのまま渡せるようにする。
+    """
+    name = config.FEATURES_EXTRACTOR.lower()
+    if name not in FEATURES_EXTRACTORS:
+        raise ValueError(
+            f"未知の FEATURES_EXTRACTOR: {name!r}（候補: {list(FEATURES_EXTRACTORS)}）"
+        )
+    cls = FEATURES_EXTRACTORS[name]
+    dim = config.FEATURES_DIM
+    if name == "resnet":
+        kwargs = dict(features_dim=dim, num_blocks=config.NUM_BLOCKS)
+    elif name == "tcn":
+        kwargs = dict(features_dim=dim, num_blocks=config.NUM_BLOCKS, kernel_size=config.TCN_KERNEL)
+    elif name in ("lstm", "gru"):
+        kwargs = dict(features_dim=dim, num_layers=config.RNN_LAYERS, rnn_type=name)
+    else:  # mlp
+        kwargs = dict(features_dim=dim, hidden=config.MLP_HIDDEN)
+    return cls, kwargs
 
 
 # ──────────────────────────────
-# 3. データ準備・学習ユーティリティ（main / train_multi で共有）
+# 2. データ準備・学習ユーティリティ
 def make_env(df, trade_start_date=None):
     """A-4: コスト・リスク制限は config に統一。trade_start_date で開始日を指定可。"""
     return NikkeiEnv(
@@ -522,9 +592,14 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     train_env = DummyVecEnv([lambda: make_env(train_df)])
 
-    # G-1: config.ALGO に応じて QR-DQN / DQN を構築（env・ResNet・報酬は共通）
-    model = build_model(train_env, device, features_extractor_class=ResNetFeatures)
-    print(f"新たにモデルを作成しました（algo={config.ALGO}）。")
+    # G-1/G-2: config.ALGO に応じて QR-DQN / DQN、config.FEATURES_EXTRACTOR で特徴抽出器を選ぶ
+    extractor_cls, extractor_kwargs = make_features_extractor()
+    model = build_model(
+        train_env, device,
+        features_extractor_class=extractor_cls,
+        features_extractor_kwargs=extractor_kwargs,
+    )
+    print(f"新たにモデルを作成しました（algo={config.ALGO}, extractor={config.FEATURES_EXTRACTOR}）。")
 
     checkpoint_callback = CheckpointCallback(
         save_freq=10000, save_path=config.MODEL_DIR, name_prefix=config.model_name()

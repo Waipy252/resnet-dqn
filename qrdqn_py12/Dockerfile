@@ -10,6 +10,6 @@ RUN uv sync --frozen
 
 COPY . .
 
-EXPOSE 13000
+EXPOSE 7860
 
 CMD ["uv", "run", "visualize.py"]

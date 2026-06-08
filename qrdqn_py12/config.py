@@ -32,9 +32,16 @@ DSR_WARMUP = 100          # 最初の N ステップは報酬0（≒1/DSR_ETA。
 DSR_VAR_FLOOR = 1e-4      # 分散の下限（日次対数リターン std≈0.01 → var≈1e-4 のスケール）
 DSR_CLIP = 1.0            # 1ステップDSR報酬のクリップ幅 [-1,1]
 
-# ── モデル（ResNet特徴抽出器）──────────────
-FEATURES_DIM = 128        # 158→128 に整理（C-4）。GroupNorm の分割も素直になる
-NUM_BLOCKS = 3
+# ── モデル（特徴抽出器）────────────────────
+# G-2: 特徴抽出アーキを config で切替（過学習比較用）。
+#   "resnet": 1D ResNet（既定）/ "tcn": Dilated Causal Conv /
+#   "lstm" / "gru": RNN / "mlp": 薄いMLP（ベースライン）
+FEATURES_EXTRACTOR = "resnet"
+FEATURES_DIM = 128        # 全アーキ共通の出力次元（158→128 に整理, C-4）
+NUM_BLOCKS = 3            # resnet / tcn のブロック数
+TCN_KERNEL = 3           # tcn の畳み込みカーネル幅
+RNN_LAYERS = 1           # lstm / gru の層数
+MLP_HIDDEN = 128         # mlp の隠れ層幅
 
 # ── 学習アルゴリズム（G-1）────────────────────
 # "qrdqn": 分布型DQN（sb3-contrib）。報酬ノイズに強く DQN より安定。env はそのまま。

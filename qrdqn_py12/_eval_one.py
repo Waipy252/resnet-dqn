@@ -44,10 +44,18 @@ AlgoClass = get_algo_class()
 print("algo =", AlgoClass.__name__, "| reward =", config.REWARD_TYPE)
 
 def _steps(p):
-    return int(p.rsplit("_", 2)[1])
+    """ファイル名から識別ラベル。命名規約 ..._<steps>_steps.zip なら steps(int)、
+    リネーム済みzipは ..._<start>_<end>_ 以降の判別部分（無ければファイル名）を返す。"""
+    stem = os.path.splitext(os.path.basename(p))[0]
+    parts = stem.rsplit("_", 2)
+    if len(parts) == 3 and parts[2] == "steps" and parts[1].isdigit():
+        return int(parts[1])
+    prefix = f"nikkei_cp_{config.TRAIN_START}_{config.TRAIN_END}_"
+    return stem[len(prefix):] if stem.startswith(prefix) else stem
 
 
-models = sorted(glob.glob("nikkei_cp_*_steps.zip"), key=_steps)
+# `*_steps.zip` の命名に縛られず、リネーム済みのベストモデルも拾う
+models = sorted(glob.glob("nikkei_cp_*.zip"), key=lambda p: str(_steps(p)))
 print("対象モデル:", [_steps(p) for p in models])
 
 summary = []

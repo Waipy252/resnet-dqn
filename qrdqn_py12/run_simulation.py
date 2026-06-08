@@ -45,22 +45,35 @@ def run_simulation_try18res(price, end_day, vix, jpy, usr):
         final_actions = []
         results = []
 
+        # カレントにある学習済みzipを全部拾う（_eval_one.py と同じ流儀）。
+        # `*_steps.zip` の命名に縛られず、リネーム済みのベストモデルも対象にする。
+        import glob
+        import os
+
+        def _steps_from_path(p):
+            stem = os.path.splitext(os.path.basename(p))[0]
+            parts = stem.rsplit("_", 2)
+            if len(parts) == 3 and parts[2] == "steps" and parts[1].isdigit():
+                return int(parts[1])
+            return stem
+
+        model_paths = sorted(
+            glob.glob("nikkei_cp_*.zip"), key=lambda p: str(_steps_from_path(p))
+        )
+        if not model_paths:
+            print("モデルzipが見つかりません（nikkei_cp_*_steps.zip）")
+
         # 各モデルで評価
-        for i in range(200000, 200001, 10000):
+        for model_path in model_paths:
+            num_steps = _steps_from_path(model_path)
             obs, _ = test_env.reset()
             done = False
             action_history = []
 
-            num_steps = i
             try:
-                model = get_algo_class().load(
-                    f"./{config.model_name(num_steps)}.zip",
-                    env=test_env,
-                )
+                model = get_algo_class().load(model_path, env=test_env)
             except FileNotFoundError:
-                print(
-                    f"モデルファイル {config.model_name(num_steps)}.zip が見つかりません。"
-                )
+                print(f"モデルファイル {model_path} が見つかりません。")
                 continue
 
             model_result = f"## Step {num_steps}\n"

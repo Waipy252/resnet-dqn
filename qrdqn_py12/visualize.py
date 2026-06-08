@@ -1,4 +1,5 @@
 import os
+import glob
 import gradio as gr
 import pandas as pd
 import numpy as np
@@ -31,6 +32,27 @@ def clean_data_for_plot(data):
         real_data = np.real(data)
         return np.where(np.isfinite(real_data), real_data, 0.0).tolist()
     return data
+
+
+def _steps_from_path(path):
+    """ファイル名から識別ラベルを取り出す。
+
+    命名規約 nikkei_cp_..._<steps>_steps.zip なら steps(int) を、
+    それ以外（リネーム済みベストモデル等）は拡張子なしのファイル名を返す。
+    """
+    stem = os.path.splitext(os.path.basename(path))[0]
+    parts = stem.rsplit("_", 2)
+    if len(parts) == 3 and parts[2] == "steps" and parts[1].isdigit():
+        return int(parts[1])
+    return stem
+
+
+def discover_models(pattern="nikkei_cp_*.zip"):
+    """カレントにある学習済みzipを全部拾う（_eval_one.py と同じ流儀）。
+
+    `*_steps.zip` の命名に縛られず、リネーム済みのベストモデルも対象にする。
+    """
+    return sorted(glob.glob(pattern), key=lambda p: str(_steps_from_path(p)))
 
 
 def load_model_safely(model_path, env):
@@ -69,18 +91,17 @@ def evaluate_all_models(ticker="^N225", start="2000-01-01", end="2010-01-01"):
 
     results = []
 
-    for i in range(200000, 200001, 10000):
+    model_paths = discover_models()
+    if not model_paths:
+        print("モデルzipが見つかりません（nikkei_cp_*_steps.zip）")
+    for model_path in model_paths:
+        i = _steps_from_path(model_path)
         try:
-            print(f"Evaluating Step {i}...")
+            print(f"Evaluating Step {i} ({model_path})...")
 
             obs, _ = test_env.reset()
             done = False
             action_history = []
-
-            model_path = f"nikkei_cp_1997-01-01_2024-01-01_{i}_steps.zip"
-            if not os.path.exists(model_path):
-                print(f"Model file not found: {model_path}")
-                continue
 
             model = load_model_safely(model_path, test_env)
 

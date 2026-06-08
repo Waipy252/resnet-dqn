@@ -132,6 +132,10 @@ class NikkeiEnv(gym.Env):
         # 報酬設計（G-3-1: 差分シャープレシオ）
         self.reward_type = config.REWARD_TYPE
         self.dsr_eta = config.DSR_ETA
+        # 数値安定化パラメータ（G-3-2）
+        self.dsr_warmup = config.DSR_WARMUP        # 序盤は報酬0（分母が信用できない）
+        self.dsr_var_floor = config.DSR_VAR_FLOOR  # 分散の床（日次リターンのスケール）
+        self.dsr_clip = config.DSR_CLIP            # 1ステップ報酬のクリップ幅
         # リターンの1次/2次モーメントのEMA（差分シャープ計算用）
         self.dsr_A = 0.0
         self.dsr_B = 0.0
@@ -184,17 +188,29 @@ class NikkeiEnv(gym.Env):
         D_t = (B_{t-1}·ΔA - 0.5·A_{t-1}·ΔB) / (B_{t-1} - A_{t-1}^2)^{3/2}
             ΔA = r - A_{t-1},  ΔB = r^2 - B_{t-1}
         A,B はリターンの1次/2次モーメントのEMA。リスク調整後の改善度を即時報酬にする。
+
+        数値安定化（G-3-2）:
+        - エピソード開始直後は A,B,var が極小で分母 var^1.5 が爆発し、1回の
+          リターンで報酬が数百に跳ねる。これがeval報酬の±1500フリップ＝
+          checkpoint選抜/シード間不安定の主因だった。
+        - 対策: (1) 最初の DSR_WARMUP ステップは統計だけ更新して報酬0、
+          (2) 分散を日次リターンのスケールでフロア、(3) 報酬をクリップ。
         """
         eta = self.dsr_eta
         A_prev, B_prev = self.dsr_A, self.dsr_B
         dA = r - A_prev
         dB = r * r - B_prev
-        var = B_prev - A_prev * A_prev
-        # 分散がほぼ0（初期数ステップ等）は未定義 → 0 を返してから統計だけ更新
-        if var > 1e-12:
-            dsr = (B_prev * dA - 0.5 * A_prev * dB) / (var ** 1.5)
-        else:
+        # 分散は理論上非負だが浮動小数で負になりうるので max(0,·) → 現実的な床を張る
+        var = max(B_prev - A_prev * A_prev, 0.0)
+        var = max(var, self.dsr_var_floor)
+
+        # ウォームアップ中は分母が信用できないので報酬0（統計だけ更新）
+        if self.num_step <= self.dsr_warmup:
             dsr = 0.0
+        else:
+            dsr = (B_prev * dA - 0.5 * A_prev * dB) / (var ** 1.5)
+            dsr = float(np.clip(dsr, -self.dsr_clip, self.dsr_clip))
+
         # モーメントを更新（D_t を計算した後に行う）
         self.dsr_A = A_prev + eta * dA
         self.dsr_B = B_prev + eta * dB

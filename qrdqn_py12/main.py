@@ -290,11 +290,17 @@ class NikkeiEnv(gym.Env):
         # B-2: 未来3日を覗く中期報酬シェイピングは TD 学習を壊すため削除。
         step_log_return = float(np.log(self.balance / old_balance))
 
-        # 報酬: 差分シャープ / 差分下方偏差 / 対数リターン（config で切替）
+        # 報酬: 差分シャープ / 差分下方偏差 / 超過リターン / 対数リターン（config で切替）
         if self.reward_type == "dsr":
             reward = self._differential_sharpe(step_log_return)
         elif self.reward_type == "ddr":
             reward = self._differential_downside(step_log_return)
+        elif self.reward_type == "excess":
+            # 超過リターン（対B&H）: 戦略の対数リターン − 市場(Long固定)の対数リターン（G-3-5）。
+            # market_log_return は手数料なしの素の市場リターン。Long保有時はほぼ相殺され0付近、
+            # Flatで市場↑なら負（機会損失）、Short成功なら正。B&H超えを直接報酬にする。
+            market_log_return = float(np.log1p(ret))
+            reward = step_log_return - market_log_return
         else:
             reward = step_log_return
 

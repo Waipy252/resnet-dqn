@@ -136,6 +136,7 @@ class NikkeiEnv(gym.Env):
         self.dsr_warmup = config.DSR_WARMUP        # 序盤は報酬0（分母が信用できない）
         self.dsr_var_floor = config.DSR_VAR_FLOOR  # 分散の床（日次リターンのスケール）
         self.dsr_clip = config.DSR_CLIP            # 1ステップ報酬のクリップ幅
+        self.benchmark_weight = config.BENCHMARK_WEIGHT  # excess系: 部分ベンチマーク係数 β
         # リターンの1次/2次モーメントのEMA（差分シャープ計算用）
         self.dsr_A = 0.0
         self.dsr_B = 0.0
@@ -296,11 +297,18 @@ class NikkeiEnv(gym.Env):
         elif self.reward_type == "ddr":
             reward = self._differential_downside(step_log_return)
         elif self.reward_type == "excess":
-            # 超過リターン（対B&H）: 戦略の対数リターン − 市場(Long固定)の対数リターン（G-3-5）。
-            # market_log_return は手数料なしの素の市場リターン。Long保有時はほぼ相殺され0付近、
-            # Flatで市場↑なら負（機会損失）、Short成功なら正。B&H超えを直接報酬にする。
+            # 超過リターン（対B&H）: 戦略の対数リターン − β·市場(Long固定)の対数リターン（G-3-5/G-3-7）。
+            # market_log_return は手数料なしの素の市場リターン。β=1で純粋なB&H超え（上昇Long保有は0）、
+            # β<1なら上昇Long保有に (1−β)·market の正報酬が残り、Flat/Short は相対的に損。
             market_log_return = float(np.log1p(ret))
-            reward = step_log_return - market_log_return
+            reward = step_log_return - self.benchmark_weight * market_log_return
+        elif self.reward_type == "excess_dsr":
+            # 差分インフォメーションレシオ（G-3-6）: DSRを部分超過リターンの系列に対して計算する。
+            # excess（B&H超え, β適用）にDSRのリスク調整＋安定化を被せた版。_differential_sharpe の
+            # 内部モーメント(dsr_A/dsr_B)が超過リターンを追跡する（reward_type毎に1本のみ使用）。
+            market_log_return = float(np.log1p(ret))
+            excess = step_log_return - self.benchmark_weight * market_log_return
+            reward = self._differential_sharpe(excess)
         else:
             reward = step_log_return
 

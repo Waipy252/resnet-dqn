@@ -136,10 +136,12 @@ class NikkeiEnv(gym.Env):
         self.dsr_warmup = config.DSR_WARMUP        # 序盤は報酬0（分母が信用できない）
         self.dsr_var_floor = config.DSR_VAR_FLOOR  # 分散の床（日次リターンのスケール）
         self.dsr_clip = config.DSR_CLIP            # 1ステップ報酬のクリップ幅
-        self.pnl_weight = config.PNL_WEIGHT        # dsr_pnl: 実損益項の重み
         # リターンの1次/2次モーメントのEMA（差分シャープ計算用）
         self.dsr_A = 0.0
         self.dsr_B = 0.0
+        # 差分下方偏差レシオ用: 1次モーメント A と下方2次モーメント DD²（min(r,0)²）のEMA
+        self.ddr_A = 0.0
+        self.ddr_DD2 = 0.0
 
         # エピソード開始時のポジション
         self.prev_action = int(Action.FLAT)
@@ -175,6 +177,9 @@ class NikkeiEnv(gym.Env):
         # 差分シャープのモーメントもリセット
         self.dsr_A = 0.0
         self.dsr_B = 0.0
+        # 差分下方偏差のモーメントもリセット
+        self.ddr_A = 0.0
+        self.ddr_DD2 = 0.0
         return self._get_observation(), {}
 
     def _get_observation(self):
@@ -217,6 +222,42 @@ class NikkeiEnv(gym.Env):
         self.dsr_B = B_prev + eta * dB
         return float(dsr)
 
+    def _differential_downside(self, r):
+        """差分下方偏差レシオ（Differential Downside Deviation Ratio; Moody&Saffell 1998）。
+
+        DSR が全分散で割るのに対し、DDR は下方偏差 DD（負リターンのみの2乗平均）で割る
+        Sortino 型（G-3-4）。上昇方向のボラは罰さないので「上昇を取りに行く」方向に
+        インセンティブが働き、DSR の様子見(Flat)偏りを緩和する狙い。
+
+        A   : リターンの1次モーメントのEMA
+        DD² : min(r,0)² のEMA（下方2次モーメント）
+        D_t = dDDR/dη|_{η=0}（Moody&Saffell の閉形式）:
+            r > 0 : (r − A/2) / DD
+            r ≤ 0 : (DD²·(r − A/2) − A·r²/2) / DD³
+        数値安定化は DSR と同様（warmup で報酬0 / DD² にフロア / 報酬クリップ）。
+        """
+        eta = self.dsr_eta
+        A_prev, DD2_prev = self.ddr_A, self.ddr_DD2
+        downside = min(r, 0.0)
+        # 下方2次モーメントにフロア（序盤 DD²≈0 で DD³ が爆発するのを防ぐ）
+        DD2_floored = max(DD2_prev, self.dsr_var_floor)
+        DD_prev = DD2_floored ** 0.5
+
+        # ウォームアップ中は分母が信用できないので報酬0（統計だけ更新）
+        if self.num_step <= self.dsr_warmup:
+            ddr = 0.0
+        elif r > 0.0:
+            ddr = (r - 0.5 * A_prev) / DD_prev
+        else:
+            ddr = (DD2_floored * (r - 0.5 * A_prev) - 0.5 * A_prev * r * r) / (DD_prev ** 3)
+        if self.num_step > self.dsr_warmup:
+            ddr = float(np.clip(ddr, -self.dsr_clip, self.dsr_clip))
+
+        # モーメントを更新（D_t を計算した後に行う）
+        self.ddr_A = A_prev + eta * (r - A_prev)
+        self.ddr_DD2 = DD2_prev + eta * (downside * downside - DD2_prev)
+        return float(ddr)
+
     def step(self, action):
         action = int(action)
         old_balance = float(self.balance)
@@ -249,13 +290,11 @@ class NikkeiEnv(gym.Env):
         # B-2: 未来3日を覗く中期報酬シェイピングは TD 学習を壊すため削除。
         step_log_return = float(np.log(self.balance / old_balance))
 
-        # 報酬（G-3-1）: 差分シャープ / 対数リターン / 両者の加重和（config で切替）
+        # 報酬: 差分シャープ / 差分下方偏差 / 対数リターン（config で切替）
         if self.reward_type == "dsr":
             reward = self._differential_sharpe(step_log_return)
-        elif self.reward_type == "dsr_pnl":
-            # DSR（リスク調整）＋ 実損益（リターン方向）の加重和（G-3-3）。
-            # DSRだけだと様子見最適化でリターンが伸びないため実損益を直接加える。
-            reward = self._differential_sharpe(step_log_return) + self.pnl_weight * step_log_return
+        elif self.reward_type == "ddr":
+            reward = self._differential_downside(step_log_return)
         else:
             reward = step_log_return
 

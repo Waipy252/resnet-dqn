@@ -136,6 +136,7 @@ class NikkeiEnv(gym.Env):
         self.dsr_warmup = config.DSR_WARMUP        # 序盤は報酬0（分母が信用できない）
         self.dsr_var_floor = config.DSR_VAR_FLOOR  # 分散の床（日次リターンのスケール）
         self.dsr_clip = config.DSR_CLIP            # 1ステップ報酬のクリップ幅
+        self.pnl_weight = config.PNL_WEIGHT        # dsr_pnl: 実損益項の重み
         # リターンの1次/2次モーメントのEMA（差分シャープ計算用）
         self.dsr_A = 0.0
         self.dsr_B = 0.0
@@ -248,9 +249,13 @@ class NikkeiEnv(gym.Env):
         # B-2: 未来3日を覗く中期報酬シェイピングは TD 学習を壊すため削除。
         step_log_return = float(np.log(self.balance / old_balance))
 
-        # 報酬（G-3-1）: 差分シャープレシオ or 対数リターン（config で切替）
+        # 報酬（G-3-1）: 差分シャープ / 対数リターン / 両者の加重和（config で切替）
         if self.reward_type == "dsr":
             reward = self._differential_sharpe(step_log_return)
+        elif self.reward_type == "dsr_pnl":
+            # DSR（リスク調整）＋ 実損益（リターン方向）の加重和（G-3-3）。
+            # DSRだけだと様子見最適化でリターンが伸びないため実損益を直接加える。
+            reward = self._differential_sharpe(step_log_return) + self.pnl_weight * step_log_return
         else:
             reward = step_log_return
 

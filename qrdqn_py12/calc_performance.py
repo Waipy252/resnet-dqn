@@ -62,7 +62,7 @@ def calculate_performance_metrics(equity_curve, action_history):
     total_days = len(daily_returns)
     cumulative_return = (equity_curve[-1] / equity_curve[0]) - 1
     annual_return = (
-        (1 + cumulative_return) ** (250 / total_days) - 1 if total_days > 0 else 0
+        (1 + cumulative_return) ** (252 / total_days) - 1 if total_days > 0 else 0
     )
 
     # 最大ドローダウン

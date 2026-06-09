@@ -1,6 +1,6 @@
 """学習・評価で共有する設定（A-4 / C-4: ハイパーパラメータの一元管理）。
 
-main.py / eval.py / run_simulation.py はここを import して同じ値を使う。
+main.py / _eval_one.py / run_simulation.py はここを import して同じ値を使う。
 学習と評価でコストやリスク制限がズレないようにするのが目的。
 """
 

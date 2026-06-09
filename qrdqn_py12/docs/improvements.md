@@ -16,7 +16,7 @@
 ## F. 運用ワークフロー上の困りごと（ユーザー報告）
 
 ### F-4. 当日のデータをすぐ取得して投入できない
-- 現状は `eval.py` / `run_simulation.py` で `manual_data` を手打ち（High=Low=Open=Close の合成行＝D-2 の歪みも誘発）。
+- 現状は `run_simulation.py` で `manual_data` を手打ち（High=Low=Open=Close の合成行＝D-2 の歪みも誘発）。
 - **対策**:
   - `data.py` に `fetch_latest()` を追加し、yfinance `Ticker("^N225").fast_info` / `history(period="5d")` で最新OHLC、`^VIX`・`^TNX` を自動取得。
   - 金利など低頻度値のみ引数 or キャッシュで補完。

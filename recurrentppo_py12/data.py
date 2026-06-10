@@ -4,6 +4,19 @@ import pandas as pd
 import numpy as np
 
 
+def _live_quote(symbol):
+    """銘柄の現在値（ライブ）を返す。取得できなければ None。"""
+    try:
+        t = yf.Ticker(symbol)
+        p = t.fast_info.get("lastPrice")
+        if p is not None and np.isfinite(p):
+            return float(p)
+        h = t.history(period="1d", interval="5m")
+        return float(h["Close"].iloc[-1]) if not h.empty else None
+    except Exception:
+        return None
+
+
 def generate_env_data(start, end, ticker="JPY=X", manual_data=None, save_csv=False):
     # ^N225の取得
     test_data = yf.download(ticker, start=start, end=end)
@@ -72,12 +85,31 @@ def generate_env_data(start, end, ticker="JPY=X", manual_data=None, save_csv=Fal
     # 結合後も文字列の"null"をNaNに変換してから前日データで埋める
     test_data["VIX"] = test_data["VIX"].replace("null", np.nan).ffill()
 
+    # 米国終値がまだ無い行（当日行）は ffill だと前日値のままになる。
+    # 過去データの慣習は「日付tの行＝米国時間tの終値」なので、
+    # 進行中セッションの現在値で上書きする方が整合的。
+    if len(vix_data):
+        stale = test_data.index > vix_data.index.max()
+        if stale.any():
+            live_vix = _live_quote("^VIX")
+            if live_vix is not None:
+                test_data.loc[stale, "VIX"] = live_vix
+                print(f"VIX を現在値で補完: {live_vix:.2f}")
+
     rate_data = pd.merge(
         jp_rate, us_rate, left_index=True, right_index=True, how="left"
     )
     test_data = pd.merge(
         test_data, rate_data, left_index=True, right_index=True, how="left"
     )
+    # 米10年債利回りも VIX と同様、当日行は ^TNX の現在値で上書きする
+    if len(us_10y):
+        stale = test_data.index > us_10y.index.max()
+        if stale.any():
+            live_tnx = _live_quote("^TNX")
+            if live_tnx is not None:
+                test_data.loc[stale, "US_10Y_Rate"] = live_tnx
+                print(f"US 10Y (^TNX) を現在値で補完: {live_tnx:.2f}")
     # 手動データがある場合は追加（F-4: fetch_latest の実OHLC行を想定。
     # High=Low=Open の合成行ではなく実OHLCで延長すれば ATR/TR の歪み（D-2）も出ない）
     if manual_data is not None:

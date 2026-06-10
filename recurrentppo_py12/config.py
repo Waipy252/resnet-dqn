@@ -83,7 +83,7 @@ MAX_GRAD_NORM = 0.5
 
 # ── 早期停止（過学習対策）──────────────────
 # 検証スコア(EvalCallback)が頭打ちになったら学習を止め、検証ベスト版を保存する。
-EVAL_FREQ = 5000         # 何ステップごとに検証するか
+EVAL_FREQ = 10000         # 何ステップごとに検証するか
 EARLY_STOP_PATIENCE = 6    # この回数連続で改善しなければ停止（6×EVAL_FREQ=60kステップ）
 EARLY_STOP_MIN_EVALS = 5   # 最低この回数は評価してから停止判定
 

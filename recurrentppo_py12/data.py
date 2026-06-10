@@ -4,19 +4,6 @@ import pandas as pd
 import numpy as np
 
 
-def _live_quote(symbol):
-    """銘柄の現在値（ライブ）を返す。取得できなければ None。"""
-    try:
-        t = yf.Ticker(symbol)
-        p = t.fast_info.get("lastPrice")
-        if p is not None and np.isfinite(p):
-            return float(p)
-        h = t.history(period="1d", interval="5m")
-        return float(h["Close"].iloc[-1]) if not h.empty else None
-    except Exception:
-        return None
-
-
 def generate_env_data(start, end, ticker="JPY=X", manual_data=None, save_csv=False):
     # ^N225の取得
     test_data = yf.download(ticker, start=start, end=end)
@@ -63,8 +50,8 @@ def generate_env_data(start, end, ticker="JPY=X", manual_data=None, save_csv=Fal
     us_10y.columns = us_10y.columns.get_level_values(0)
     us_10y.rename(columns={"Close": "US_10Y_Rate"}, inplace=True)
     us_10y.index.name = "Date"
-    # 日次だが取引所休場日を埋めるため reindex + ffill
-    us_rate = us_10y.reindex(date_range).ffill()
+    if getattr(us_10y.index, "tz", None) is not None:
+        us_10y.index = us_10y.index.tz_localize(None)
 
     # -------------------------
     # 日本10年債利回り（F-3）
@@ -76,48 +63,38 @@ def generate_env_data(start, end, ticker="JPY=X", manual_data=None, save_csv=Fal
     jp_rate = jp_rate.reindex(date_range).interpolate(method="linear").ffill().bfill()
 
     # 3. アメリカの恐怖指数 VIX のデータを取得（終値を使用）
+    # ここではダウンロードだけ行い、行への割り当ては manual_data 結合後に
+    # asof(t-1日) でまとめて行う（下のコメント参照）。
     vix_data = yf.download("^VIX", start=start, end=end)[["Close"]]
-    vix_data.rename(columns={"Close": "VIX"}, inplace=True)
     vix_data.columns = vix_data.columns.get_level_values(0)
-    # 文字列の"null"をNaNに変換してから前日データで埋める
-    vix_data["VIX"] = vix_data["VIX"].replace("null", np.nan).ffill()
-    test_data = test_data.join(vix_data, how="left")
-    # 結合後も文字列の"null"をNaNに変換してから前日データで埋める
-    test_data["VIX"] = test_data["VIX"].replace("null", np.nan).ffill()
+    if getattr(vix_data.index, "tz", None) is not None:
+        vix_data.index = vix_data.index.tz_localize(None)
+    vix_series = pd.to_numeric(vix_data["Close"], errors="coerce").dropna()
 
-    # 米国終値がまだ無い行（当日行）は ffill だと前日値のままになる。
-    # 過去データの慣習は「日付tの行＝米国時間tの終値」なので、
-    # 進行中セッションの現在値で上書きする方が整合的。
-    if len(vix_data):
-        stale = test_data.index > vix_data.index.max()
-        if stale.any():
-            live_vix = _live_quote("^VIX")
-            if live_vix is not None:
-                test_data.loc[stale, "VIX"] = live_vix
-                print(f"VIX を現在値で補完: {live_vix:.2f}")
-
-    rate_data = pd.merge(
-        jp_rate, us_rate, left_index=True, right_index=True, how="left"
-    )
     test_data = pd.merge(
-        test_data, rate_data, left_index=True, right_index=True, how="left"
+        test_data, jp_rate, left_index=True, right_index=True, how="left"
     )
-    # 米10年債利回りも VIX と同様、当日行は ^TNX の現在値で上書きする
-    if len(us_10y):
-        stale = test_data.index > us_10y.index.max()
-        if stale.any():
-            live_tnx = _live_quote("^TNX")
-            if live_tnx is not None:
-                test_data.loc[stale, "US_10Y_Rate"] = live_tnx
-                print(f"US 10Y (^TNX) を現在値で補完: {live_tnx:.2f}")
     # 手動データがある場合は追加（F-4: fetch_latest の実OHLC行を想定。
-    # High=Low=Open の合成行ではなく実OHLCで延長すれば ATR/TR の歪み（D-2）も出ない）
+    # 指標は Open のみから計算するので Open さえ正しければ歪みは出ない）
     if manual_data is not None:
         manual_data = pd.DataFrame(manual_data)
         manual_data.index = pd.to_datetime(manual_data.index)  # 日付データを適切に変換
         # 既にyfinanceで取得済みの日付と重複したら手動データ側を優先
         test_data = test_data[~test_data.index.isin(manual_data.index)]
         test_data = pd.concat([test_data, manual_data]).sort_index()
+
+    # -------------------------
+    # 米国系列（VIX・米10年金利）のリーク防止
+    # 「米国時間dの終値」が確定するのは日本時間d+1の早朝なので、
+    # 日本の寄付きtの時点で使えるのは暦日t-1以前の米国終値だけ。
+    # 行tに同日tの終値を入れる（旧実装）と寄付き判断には未来情報になるため、
+    # 各行tには asof(t-1日)＝t-1以前で最新の終値を入れる。
+    # manual_data の行も含めて一括で上書きする（手動行のVIX等も同様に揃う）。
+    # -------------------------
+    us_series = pd.to_numeric(us_10y["US_10Y_Rate"], errors="coerce").dropna()
+    prev_day = test_data.index - pd.Timedelta(days=1)
+    test_data["VIX"] = vix_series.asof(prev_day).to_numpy()
+    test_data["US_10Y_Rate"] = us_series.asof(prev_day).to_numpy()
 
     # テクニカル指標の計算（例ではOpenを使用）
     test_data["SMA_5"] = test_data["Open"].rolling(window=5).mean()
@@ -184,20 +161,13 @@ def generate_env_data(start, end, ticker="JPY=X", manual_data=None, save_csv=Fal
     test_data["RCI_9"] = calc_rci(test_data["Open"], 9)
     test_data["RCI_26"] = calc_rci(test_data["Open"], 26)
 
-    # ATR（Average True Range）の計算 (5日と25日)
-    # 前日のOpenを取得
-    test_data["Previous_Open"] = test_data["Open"].shift(1)
-    # True Range (TR) の各構成要素を計算
-    tr1 = test_data["High"] - test_data["Low"]
-    tr2 = (test_data["High"] - test_data["Previous_Open"]).abs()
-    tr3 = (test_data["Low"] - test_data["Previous_Open"]).abs()
-    # 各日のTRは3要素の中で最大の値
-    test_data["TR"] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    # ATRはTRの単純移動平均値
+    # ATR相当のボラティリティ (5日と25日)
+    # High/Low は当日の引けまで確定しない値（寄付き時点の観測に使うと
+    # 当日情報のリークになる）ため、Open のみで構成する。
+    # TR = |当日Open − 前日Open|（行tの値はすべて寄付き時点で既知）
+    test_data["TR"] = (test_data["Open"] - test_data["Open"].shift(1)).abs()
     test_data["ATR_5"] = test_data["TR"].rolling(window=5).mean()
     test_data["ATR_25"] = test_data["TR"].rolling(window=25).mean()
-    # 途中計算用のカラム（例: Previous_Open）は削除
-    test_data.drop(columns=["Previous_Open"], inplace=True)
 
     # 副作用は呼び出し側の判断に委ねる（D-1）。デフォルトでは保存・全件printしない。
     if save_csv:
@@ -209,7 +179,7 @@ def fetch_latest(ticker="^N225"):
     """当日（直近営業日）のOHLC・VIX・金利を自動取得する（F-4）。
 
     run_simulation の manual_data を手打ちする代わりに使う。
-    High=Low=Open の合成行ではなく実OHLCを返すので、ATR/TR の歪み（D-2）も起きない。
+    実OHLCを返すが、指標計算に使われるのは Open のみ。
 
     戻り値 dict:
         date(YYYY-MM-DD), open, high, low, close, volume, vix, us_10y, jp_10y

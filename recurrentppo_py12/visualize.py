@@ -460,6 +460,94 @@ def create_test_data_table(ticker="^N225", start="2000-01-01", end="2010-01-01")
     return df.head(50)
 
 
+def create_action_log_table(
+    results, ticker="^N225", start="2000-01-01", end="2010-01-01"
+):
+    """日付ごとに各モデル・アンサンブル（多数決）のアクションを一覧にする（日時降順）。
+
+    アクションは「その日のOpenで建てて翌日のOpenまで持つ」判断なので、
+    翌日Open比（ロングがその日に得るリターン）も併記する。
+    """
+    if not results:
+        return pd.DataFrame()
+
+    test_data = generate_env_data(start, end, ticker=ticker)
+    env = NikkeiEnv(
+        test_data,
+        window_size=130,
+        transaction_cost=config.TRANSACTION_COST,
+        risk_limit=config.RISK_LIMIT,
+    )
+
+    action_label = {0: "🟢 買", 1: "⚪ 待", 2: "🔴 売"}
+    max_len = max(len(r["action_history"]) for r in results)
+
+    # 多数決（create_ensemble_result と同じロジック）
+    ensemble_actions = []
+    for i in range(max_len):
+        votes = [
+            r["action_history"][i] for r in results if i < len(r["action_history"])
+        ]
+        ensemble_actions.append(Counter(votes).most_common(1)[0][0])
+
+    # 多数決の資産カーブ（test_data を使い回して再ダウンロードを避ける）
+    ens_env = NikkeiEnv(
+        test_data,
+        window_size=130,
+        transaction_cost=config.TRANSACTION_COST,
+        risk_limit=config.RISK_LIMIT,
+    )
+    ens_env.reset()
+    for a in ensemble_actions:
+        _, _, terminated, truncated, _ = ens_env.step(a)
+        if terminated or truncated:
+            break
+    ens_equity = ens_env.get_equity_curve()  # [i+1] が i 日目のアクション後の資産
+
+    rows = []
+    for i in range(max_len):
+        step = env.trade_start + i
+        if step >= env.n:
+            break
+        open_today = float(env.open_prices[step])
+        open_next = (
+            float(env.open_prices[step + 1]) if step + 1 < env.n else float("nan")
+        )
+        row = {
+            "日付": env.dates[step].strftime("%Y-%m-%d"),
+            "Open": round(open_today, 1),
+            "翌日Open比 (%)": (
+                round((open_next / open_today - 1) * 100, 2)
+                if np.isfinite(open_next)
+                else None
+            ),
+        }
+        votes = []
+        for r in results:
+            a = (
+                r["action_history"][i]
+                if i < len(r["action_history"])
+                else None
+            )
+            row[f"モデル {r['steps']}"] = action_label.get(a, "—")
+            if a is not None:
+                votes.append(a)
+        row["多数決"] = action_label.get(ensemble_actions[i], "—")
+        row["全員一致"] = "✓" if len(set(votes)) == 1 else ""
+        if i + 1 < len(ens_equity):
+            row["多数決 資産 (円)"] = round(ens_equity[i + 1])
+            row["多数決 日次損益 (%)"] = round(
+                (ens_equity[i + 1] / ens_equity[i] - 1) * 100, 2
+            )
+        else:
+            row["多数決 資産 (円)"] = None
+            row["多数決 日次損益 (%)"] = None
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+    return df.sort_values("日付", ascending=False)
+
+
 def create_equity_curves_with_ensemble(
     results, ticker="^N225", start="2000-01-01", end="2010-01-01"
 ):
@@ -638,10 +726,10 @@ with gr.Blocks(
             )
         with gr.Column(scale=2):
             end_date_input = gr.Textbox(
-                value="2025-09-30",
+                value=pd.Timestamp.today().strftime("%Y-%m-%d"),
                 label="📅 終了日",
-                info="終了日を入力 (YYYY-MM-DD形式)",
-                placeholder="2025-09-30",
+                info="終了日を入力 (YYYY-MM-DD形式)。当日を指定すると当日バーも取得を試みる",
+                placeholder="YYYY-MM-DD",
             )
         with gr.Column(scale=1):
             analyze_btn = gr.Button(
@@ -664,6 +752,13 @@ with gr.Blocks(
             with gr.Column(scale=1):
                 ensemble_metrics = gr.Markdown()
 
+    with gr.Tab("📅 日次アクション履歴"):
+        action_log_table = gr.Dataframe(
+            label="日付ごとの各モデル・多数決のアクション（日時降順）",
+            wrap=True,
+            interactive=False,
+        )
+
     with gr.Tab("📊 テストデータ (CSV)"):
         test_data_table = gr.Dataframe(
             label="テストデータ（日時降順）", wrap=True, interactive=False
@@ -680,6 +775,7 @@ with gr.Blocks(
             create_performance_comparison(results),
             create_summary_stats(results),
             create_action_distribution(results),
+            create_action_log_table(results, ticker, start, end),
             *create_equity_curves_with_ensemble(
                 results, ticker, start, end
             ),  # グラフ、メトリクス、テストデータを返す
@@ -692,6 +788,7 @@ with gr.Blocks(
             performance_plot,
             summary_table,
             action_plot,
+            action_log_table,
             equity_plot,
             ensemble_metrics,
             test_data_table,

@@ -10,6 +10,34 @@ def generate_env_data(start, end, ticker="JPY=X", manual_data=None, save_csv=Fal
     # test_data = yf.download("^GSPC", start=start, end=end)#S&P500
     # ダウンロード直後にカラムをフラット化する
     test_data.columns = test_data.columns.get_level_values(0)
+    if getattr(test_data.index, "tz", None) is not None:
+        test_data.index = test_data.index.tz_localize(None)
+
+    # yf.download は end が排他的なうえ、当日の進行中バーを返さないことが多い。
+    # Ticker.history は当日のライブバーを含むので、範囲内の欠け（≒当日分）を補完する。
+    # VIX・金利の join より前に行うこと（後だと当日行のそれらが NaN のままになる）。
+    try:
+        recent = yf.Ticker(ticker).history(period="5d")
+        if not recent.empty:
+            recent.index = recent.index.tz_localize(None).normalize()
+            last_have = test_data.index.max() if len(test_data) else pd.Timestamp(start)
+            new_rows = recent.loc[
+                (recent.index > last_have) & (recent.index <= pd.Timestamp(end)),
+                ["Open", "High", "Low", "Close", "Volume"],
+            ]
+            if not new_rows.empty:
+                test_data = pd.concat([test_data, new_rows]).sort_index()
+                # auto_adjust されていない列（Adj Close 等）は Close で補完
+                for col in test_data.columns.difference(new_rows.columns):
+                    test_data.loc[new_rows.index, col] = test_data.loc[
+                        new_rows.index, col
+                    ].fillna(test_data.loc[new_rows.index, "Close"])
+                print(
+                    "当日バーを補完:",
+                    list(new_rows.index.strftime("%Y-%m-%d")),
+                )
+    except Exception as e:
+        print(f"当日データの補完に失敗（取得済みデータのみで継続）: {e}")
 
     date_range = pd.date_range(start=start, end=end, freq="D")
 

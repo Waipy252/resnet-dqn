@@ -48,7 +48,9 @@ def _steps_from_path(path):
     parts = stem.rsplit("_", 2)
     if len(parts) == 3 and parts[2] == "steps" and parts[1].isdigit():
         return f"{tag}{int(parts[1])}" if tag else int(parts[1])
-    return stem
+    # リネーム済みモデルは共通プレフィックスを剥がして短く（_eval_one.py と同じ流儀）
+    prefix = f"{config.model_name()}_"
+    return stem[len(prefix):] if stem.startswith(prefix) else stem
 
 
 def discover_models(pattern=None):
@@ -163,7 +165,8 @@ def create_performance_comparison(results):
             "最大ドローダウン (%)",
             "勝率 (%)",
         ),
-        vertical_spacing=0.12,
+        vertical_spacing=0.18,
+        horizontal_spacing=0.12,
     )
 
     # 年利
@@ -231,11 +234,13 @@ def create_performance_comparison(results):
         height=700,
         showlegend=False,
         template="plotly_white",
+        margin=dict(b=80),
     )
 
-    # X軸ラベル
-    fig.update_xaxes(title_text="トレーニングステップ", row=2, col=1)
-    fig.update_xaxes(title_text="トレーニングステップ", row=2, col=2)
+    # X軸ラベル（モデルが少数なのでカテゴリ軸・水平ラベルで見やすく）
+    fig.update_xaxes(type="category", tickangle=0)
+    fig.update_xaxes(title_text="モデル", row=2, col=1)
+    fig.update_xaxes(title_text="モデル", row=2, col=2)
 
     return fig
 
@@ -546,14 +551,19 @@ def create_equity_curves_with_ensemble(
     # レイアウトの更新
     fig.update_xaxes(title_text="日数")
     fig.update_yaxes(title_text="資産 (円)", secondary_y=False)
-    fig.update_yaxes(title_text="銘柄価格（正規化）", secondary_y=True)
+    # 第2軸はグリッドを消す（主軸のグリッドと重なって読みにくくなるため）
+    fig.update_yaxes(title_text="銘柄価格（正規化）", secondary_y=True, showgrid=False)
 
     fig.update_layout(
         title="資産カーブの比較 + アンサンブル（多数決）+ 銘柄価格",
         template="plotly_white",
         height=600,
         hovermode="x unified",
-        # legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
+        # カーブは右肩上がりなので左上の空き領域に凡例を重ねる
+        legend=dict(
+            yanchor="top", y=0.99, xanchor="left", x=0.01,
+            bgcolor="rgba(255,255,255,0.7)",
+        ),
     )
 
     # アンサンブルの性能指標をテキスト形式で表示
@@ -649,7 +659,7 @@ with gr.Blocks(
 
     with gr.Tab("💰 資産カーブ"):
         with gr.Row():
-            with gr.Column(scale=2):
+            with gr.Column(scale=3):
                 equity_plot = gr.Plot()
             with gr.Column(scale=1):
                 ensemble_metrics = gr.Markdown()

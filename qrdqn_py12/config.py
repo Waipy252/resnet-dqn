@@ -21,7 +21,7 @@ TRANSACTION_COST = 0.001  # 学習・評価で統一（往復スプレッド+手
 RISK_LIMIT = 0.5          # 初期資産の RISK_LIMIT 未満で終了（学習・評価で統一）
 
 # ── 報酬設計（G-3-1）──────────────────────
-# "dsr"   : 差分シャープレシオ（Moody&Saffell）。リスク調整後の改善を即時報酬に。
+# "dsr"   : うーん普通。sharp0.8くらい。差分シャープレシオ（Moody&Saffell）。リスク調整後の改善を即時報酬に。
 #           生の対数リターンより学習が安定し、ドローダウンを抑えて一貫した勝ち方に。
 # "ddr"   : 差分下方偏差レシオ（Differential Downside Deviation Ratio; Moody&Saffell 1998）。
 #           DSRの分母（全分散）を下方偏差（負リターンのみ）に置換したSortino型（G-3-4）。

@@ -34,7 +34,9 @@ DATA_START = "2018-01-01"
 END = pd.Timestamp.today().strftime("%Y-%m-%d")
 
 print("テストデータ取得中...", DATA_START, "→", END)
-test_data = generate_env_data(DATA_START, END, ticker=config.TICKER)
+test_data = generate_env_data(
+    DATA_START, END, ticker=config.TICKER, save_csv="test_data_eval.csv"
+)
 
 AlgoClass = get_algo_class()
 print("algo =", AlgoClass.__name__, "| reward =", config.REWARD_TYPE)

@@ -138,25 +138,14 @@ def generate_env_data(start, end, ticker="JPY=X", manual_data=None, save_csv=Fal
     test_data["SMA_5"] = test_data["Open"].rolling(window=5).mean()
     test_data["SMA_25"] = test_data["Open"].rolling(window=25).mean()
     test_data["SMA_75"] = test_data["Open"].rolling(window=75).mean()
-    # σバンド（ボリンジャーバンド: Upper/Lower 1〜3σ × 25/75日）
+    # σバンド（Upper/Lower 1〜3σ）は偏差値と線形冗長なため生成しない。
+    # バンド位置の情報は 偏差値25/75 = 50 + 10·(Open−SMA)/STD に集約。
     test_data["STD_25"] = test_data["Open"].rolling(window=25).std()
-    test_data["Upper_3σ"] = test_data["SMA_25"] + 3 * test_data["STD_25"]
-    test_data["Lower_3σ"] = test_data["SMA_25"] - 3 * test_data["STD_25"]
-    test_data["Upper_2σ"] = test_data["SMA_25"] + 2 * test_data["STD_25"]
-    test_data["Lower_2σ"] = test_data["SMA_25"] - 2 * test_data["STD_25"]
-    test_data["Upper_1σ"] = test_data["SMA_25"] + 1 * test_data["STD_25"]
-    test_data["Lower_1σ"] = test_data["SMA_25"] - 1 * test_data["STD_25"]
     test_data["偏差値25"] = 50 + 10 * (
         (test_data["Open"] - test_data["SMA_25"]) / test_data["STD_25"]
     )
 
     test_data["STD_75"] = test_data["Open"].rolling(window=75).std()
-    test_data["Upper2_3σ"] = test_data["SMA_75"] + 3 * test_data["STD_75"]
-    test_data["Lower2_3σ"] = test_data["SMA_75"] - 3 * test_data["STD_75"]
-    test_data["Upper2_2σ"] = test_data["SMA_75"] + 2 * test_data["STD_75"]
-    test_data["Lower2_2σ"] = test_data["SMA_75"] - 2 * test_data["STD_75"]
-    test_data["Upper2_1σ"] = test_data["SMA_75"] + 1 * test_data["STD_75"]
-    test_data["Lower2_1σ"] = test_data["SMA_75"] - 1 * test_data["STD_75"]
     test_data["偏差値75"] = 50 + 10 * (
         (test_data["Open"] - test_data["SMA_75"]) / test_data["STD_75"]
     )
@@ -209,8 +198,11 @@ def generate_env_data(start, end, ticker="JPY=X", manual_data=None, save_csv=Fal
     test_data["ATR_25"] = test_data["TR"].rolling(window=25).mean()
 
     # 副作用は呼び出し側の判断に委ねる（D-1）。デフォルトでは保存・全件printしない。
+    # save_csv: True で "test_data.csv"、文字列ならそのパスに保存。
     if save_csv:
-        test_data.to_csv("test_data.csv")
+        csv_path = save_csv if isinstance(save_csv, str) else "test_data.csv"
+        test_data.to_csv(csv_path)
+        print(f"データをCSVに保存: {csv_path}")
     return test_data
 
 

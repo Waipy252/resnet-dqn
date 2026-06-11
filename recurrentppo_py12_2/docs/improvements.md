@@ -10,8 +10,8 @@
 | 項目 | 対応内容 | 実装場所 |
 |---|---|---|
 | **G-1** アルゴ変更 | QR-DQN → **RecurrentPPO**（LSTM内蔵, sb3-contrib）。オンポリシーで安定。`ALGO="ppo"` で通常PPOと比較可 | `algo.py` |
-| **G-1** 観測の再設計 | 「130日×29特徴のwindow」→ **1日1ベクトル（29特徴＋ポジションone-hot 3）**。時系列の記憶は内蔵LSTMに委譲。取引コストにより最適行動が現在ポジションに依存するため、ポジションを観測に明示 | `main.py NikkeiEnv` |
-| 冗長特徴の間引き（取り消し） | σバンド12本（Upper/Lower 1〜3σ × 25/75日）を偏差値25/75に集約して間引いた（29本→17本）が、その後**復活**させ29本に戻した（線形冗長でも z-score 後の表現としては別情報になりうるため比較検証する） | `main.FEATURE_TRANSFORMS` / `data.generate_env_data` |
+| **G-1** 観測の再設計 | 「130日×29特徴のwindow」→ **1日1ベクトル（17特徴＋ポジションone-hot 3）**。時系列の記憶は内蔵LSTMに委譲。取引コストにより最適行動が現在ポジションに依存するため、ポジションを観測に明示 | `main.py NikkeiEnv` |
+| 冗長特徴の間引き | σバンド12本（Upper/Lower 1〜3σ × 25/75日）は (Open−SMA)/STD の線形変換どうしでほぼ完全相関のため観測から除外し、**偏差値25/75 に集約（29本→17本）**。LSTMへの情報過多を削減 | `main.FEATURE_TRANSFORMS` / `data.generate_env_data` |
 | **B-3** 正規化の刷新 | ウィンドウ内MinMax（絶対水準破壊・基準ズレ）を廃止 → **リターン化/相対化＋ローリング・ロバスト z-score**（中央値/MAD, 窓252日, 因果的=未来を見ない, ±5クリップ） | `NikkeiEnv._precompute_features` |
 | **G-2** 正則化 | **weight decay**（`WEIGHT_DECAY=1e-4`）を Adam に適用。アーキはLSTM一本に簡素化（MLP/ResNet等の横断比較は qrdqn_py12 側で実施済 → [[arch-comparison-mlp-vs-resnet]]） | `algo.py build_model` |
 | **G-3** 複数OOS窓評価 | `_eval_one.py` が `EVAL_WINDOWS`（コロナ2020-22 / 軟調2022-24 / bull2024-）で**窓ごとに B&H と比較**し、超過リターン×シャープのマトリクスと「全窓edge」判定を出力 | `_eval_one.py` / `config.EVAL_WINDOWS` |
@@ -72,7 +72,7 @@
 - 過学習兆候（train/val 乖離）が TensorBoard で見えたら入れる。
 
 ### 特徴量の見直し
-- σバンド6本×2系統は一度間引いた後、復活済み（29本, 上表）。
+- σバンド6本×2系統の間引きは対応済み（29本→17本, 上表）。
 - 追加候補（いずれも東京寄付き時点で確定済み・リーク無し）:
   - 前日の S&P500 リターン（^GSPC, VIX と同じ asof(t-1) 方式）
   - USD/JPY（JPY=X）

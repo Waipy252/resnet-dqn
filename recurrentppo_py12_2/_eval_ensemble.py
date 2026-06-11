@@ -38,7 +38,9 @@ paths = sorted({p for pat in patterns for p in glob.glob(pat)})
 assert paths, f"モデルが見つからない: {patterns}"
 
 print("テストデータ取得中...", DATA_START, "→", END)
-test_data = generate_env_data(DATA_START, END, ticker=config.TICKER)
+test_data = generate_env_data(
+    DATA_START, END, ticker=config.TICKER, save_csv="test_data_ensemble.csv"
+)
 
 AlgoClass = get_algo_class()
 models = [AlgoClass.load(p, device="cpu") for p in paths]

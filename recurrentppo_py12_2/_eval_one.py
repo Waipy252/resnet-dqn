@@ -50,12 +50,12 @@ def _steps(p):
     parts = stem.rsplit("_", 2)
     if len(parts) == 3 and parts[2] == "steps" and parts[1].isdigit():
         return f"{tag}{int(parts[1])}" if tag else int(parts[1])
-    prefix = f"{config.model_name()}_"
-    return stem[len(prefix):] if stem.startswith(prefix) else stem
+    m = re.match(r"nikkei_rppo_\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}_?(.+)", stem)
+    return f"{tag}{m.group(1)}" if m else stem
 
 
-# `*_steps.zip` の命名に縛られず、リネーム済みのベストモデルも拾う
-models = sorted(glob.glob(f"{config.model_name()}*.zip"), key=lambda p: str(_steps(p)))
+# `*_steps.zip` の命名に縛られず、TRAIN_END が違う旧モデルやリネーム済みベストも拾う
+models = sorted(glob.glob("nikkei_rppo_*.zip"), key=lambda p: str(_steps(p)))
 print("対象モデル:", [_steps(p) for p in models])
 
 # 窓ごとの B&H（環境と同じ前処理での Open 始点→終点）を先に計算

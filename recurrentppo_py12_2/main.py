@@ -154,6 +154,13 @@ class NikkeiEnv(gym.Env):
         # 差分下方偏差レシオ用: 1次モーメント A と下方2次モーメント DD²（min(r,0)²）のEMA
         self.ddr_A = 0.0
         self.ddr_DD2 = 0.0
+        # logret 派生（G-3-8）のパラメータと状態
+        self.risk_lambda = config.RISK_LAMBDA    # risk: 2次ペナルティ係数
+        self.asym_kappa = config.ASYM_KAPPA      # asym: 損失側の倍率
+        self.dd_lambda = config.DD_LAMBDA        # ddpen: DD増分ペナルティ係数
+        self.equity_peak = float(self.initial_balance)  # ddpen: 資産のピーク
+        self.prev_dd = 0.0                       # ddpen: 前ステップのドローダウン率
+        self.vol2 = 0.0                          # volnorm: リターン2次モーメントのEMA
 
         # エピソード開始時のポジション
         self.prev_action = int(Action.FLAT)
@@ -223,6 +230,10 @@ class NikkeiEnv(gym.Env):
         # 差分下方偏差のモーメントもリセット
         self.ddr_A = 0.0
         self.ddr_DD2 = 0.0
+        # logret 派生（G-3-8）の状態もリセット
+        self.equity_peak = float(self.initial_balance)
+        self.prev_dd = 0.0
+        self.vol2 = 0.0
         return self._get_observation(), {}
 
     def _differential_sharpe(self, r):
@@ -293,6 +304,23 @@ class NikkeiEnv(gym.Env):
         self.ddr_DD2 = DD2_prev + eta * (downside * downside - DD2_prev)
         return float(ddr)
 
+    def _vol_normalized(self, r):
+        """ボラ正規化 logret（G-3-8 "volnorm", DSR-lite）。
+
+        reward = r / max(σ_ema, √DSR_VAR_FLOOR)。σ_ema はリターン2乗のEMAの平方根。
+        DSR の「リスク調整」の核（ボラで割る）だけ残し、不安定な微分項を捨てた版。
+        分母を持つため DSR と同じ安定化を流用: warmup 中は報酬0（統計のみ更新）、
+        分散フロア、±DSR_CLIP クリップ。
+        """
+        sigma = max(self.vol2, self.dsr_var_floor) ** 0.5
+        if self.num_step <= self.dsr_warmup:
+            reward = 0.0
+        else:
+            reward = float(np.clip(r / sigma, -self.dsr_clip, self.dsr_clip))
+        # σ を更新（reward を計算した後に行う。DSR/DDR と同じ順序）
+        self.vol2 += self.dsr_eta * (r * r - self.vol2)
+        return reward
+
     def step(self, action):
         action = int(action)
         old_balance = float(self.balance)
@@ -339,6 +367,21 @@ class NikkeiEnv(gym.Env):
             market_log_return = float(np.log1p(ret))
             excess = step_log_return - self.benchmark_weight * market_log_return
             reward = self._differential_sharpe(excess)
+        elif self.reward_type == "risk":
+            # リスク感応 logret（G-3-8）: 平均分散効用の1ステップ版。大きな変動を対称に罰する
+            reward = step_log_return - 0.5 * self.risk_lambda * step_log_return ** 2
+        elif self.reward_type == "asym":
+            # 損失非対称 logret（G-3-8）: 損失だけ κ 倍に罰する（分母なしの Sortino 型）
+            reward = step_log_return if step_log_return > 0.0 else self.asym_kappa * step_log_return
+        elif self.reward_type == "ddpen":
+            # ドローダウン・ペナルティ logret（G-3-8）: 新たにDDを掘った分だけ罰する
+            self.equity_peak = max(self.equity_peak, float(self.balance))
+            dd = 1.0 - float(self.balance) / self.equity_peak
+            reward = step_log_return - self.dd_lambda * max(0.0, dd - self.prev_dd)
+            self.prev_dd = dd
+        elif self.reward_type == "volnorm":
+            # ボラ正規化 logret（G-3-8）: リターンを自身のEMAボラで割る（DSR-lite）
+            reward = self._vol_normalized(step_log_return)
         else:
             reward = step_log_return
 

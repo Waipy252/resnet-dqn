@@ -49,17 +49,18 @@ def _steps_from_path(path):
     if len(parts) == 3 and parts[2] == "steps" and parts[1].isdigit():
         return f"{tag}{int(parts[1])}" if tag else int(parts[1])
     # リネーム済みモデルは共通プレフィックスを剥がして短く（_eval_one.py と同じ流儀）
-    prefix = f"{config.model_name()}_"
-    return stem[len(prefix):] if stem.startswith(prefix) else stem
+    m = re.match(r"nikkei_rppo_\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}_?(.+)", stem)
+    return f"{tag}{m.group(1)}" if m else stem
 
 
 def discover_models(pattern=None):
     """カレントにある学習済みzipを全部拾う（_eval_one.py と同じ流儀）。
 
-    `*_steps.zip` の命名に縛られず、リネーム済みのベストモデルも対象にする。
+    `*_steps.zip` の命名に縛られず、TRAIN_END が違う旧モデルや
+    リネーム済みのベストモデルも対象にする。
     """
     if pattern is None:
-        pattern = f"{config.model_name()}*.zip"
+        pattern = "nikkei_rppo_*.zip"
     return sorted(glob.glob(pattern), key=lambda p: str(_steps_from_path(p)))
 
 
@@ -91,7 +92,7 @@ def evaluate_all_models(ticker="^N225", start="2000-01-01", end="2010-01-01"):
 
     model_paths = discover_models()
     if not model_paths:
-        print(f"モデルzipが見つかりません（{config.model_name()}*.zip）")
+        print("モデルzipが見つかりません（nikkei_rppo_*.zip）")
     for model_path in model_paths:
         i = _steps_from_path(model_path)
         try:

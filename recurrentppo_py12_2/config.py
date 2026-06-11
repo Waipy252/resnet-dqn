@@ -51,7 +51,7 @@ OBS_CLIP = 5.0        # z-score のクリップ幅
 #
 # ── logret 骨格の派生（G-3-8）。logret の「学習が安定する」性質（スケール一定・分母なし）
 #    を保ったまま、小さな修正項でリスク調整を注入する系統。
-# "risk"   : リスク感応 logret。reward = r − RISK_LAMBDA·r²/2（Ritter 2017 の平均分散効用）。
+# "risk"   : ちょっといい。リスク感応 logret。reward = r − RISK_LAMBDA·r²/2（Ritter 2017 の平均分散効用）。
 #            大きな変動を対称に罰する。λ=0 で logret に退化。
 # "asym"   : 損失非対称 logret。reward = r (r>0) / ASYM_KAPPA·r (r≤0)。
 #            Sortino の思想を分母なしで実現。下げ局面で Flat/Short へ逃げる誘因。
@@ -61,7 +61,7 @@ OBS_CLIP = 5.0        # z-score のクリップ幅
 # "volnorm": ボラ正規化 logret（DSR-lite）。reward = r / max(σ_ema, √DSR_VAR_FLOOR)。
 #            DSR のリスク調整の核だけ残し不安定な微分項を捨てた版。分母が復活するので
 #            warmup 中は報酬0・±DSR_CLIP でクリップ（DSR と同じ安定化を流用）。
-REWARD_TYPE = "risk"
+REWARD_TYPE = "volnorm"
 RISK_LAMBDA = 2.0    # risk: 2次ペナルティの強さ（1〜10目安）
 ASYM_KAPPA = 2.0     # asym: 損失側の倍率（1.5〜3目安, 1で logret に退化）
 DD_LAMBDA = 2.0      # ddpen: DD増分ペナルティの強さ（1〜5目安, 0で logret に退化）

@@ -84,7 +84,7 @@ EARLY_STOP_MIN_EVALS = 5   # 最低この回数は評価してから停止判定
 
 # ── パス ────────────────────────────────
 MODEL_DIR = "."           # 既存どおりカレントに保存
-TENSORBOARD_LOG = "./tb/"  # 学習曲線の記録（C-3）
+TENSORBOARD_LOG = None  # 学習曲線の記録（C-3）
 
 
 def model_name(steps=None):

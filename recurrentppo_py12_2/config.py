@@ -71,6 +71,12 @@ WEIGHT_DECAY = 1e-4       # G-2: 過学習対策（AdamのL2正則化）
 SEED = 42                 # 再現性（C-2）
 TOTAL_TIMESTEPS = 500_000  # PPOはオフポリシーよりサンプル効率が低いので多め（早期停止前提）
 LEARNING_RATE = 3e-4
+# 線形減衰スケジュール（PPOの常套手段。終盤の方策の暴れ・破壊的更新を抑える）。
+# "linear": progress_remaining(1→0) に比例して 初期値→0 へ線形減衰 / "constant": 固定。
+# 減衰は TOTAL_TIMESTEPS 基準なので、早期停止した場合は途中の値で止まる
+# （例: 500kのうち150kで停止 → LRは初期値の70%まで下がった状態）。
+LR_SCHEDULE = "linear"
+CLIP_RANGE_SCHEDULE = "linear"
 N_STEPS = 2048            # 1回の rollout 長
 BATCH_SIZE = 256          # ミニバッチ（N_STEPS を割り切る値）
 N_EPOCHS = 10             # rollout ごとの再利用エポック数

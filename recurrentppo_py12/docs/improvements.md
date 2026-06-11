@@ -18,6 +18,7 @@
 | **D-2** 合成行のATR歪み | F-4 と同時解消。manual_data を実OHLC行で延長（High=Low=Open の合成行を廃止）。重複日付は手動データ優先 | `data.py generate_env_data` / `run_simulation.py` |
 | 評価時のLSTM文脈 | OOS開始位置へジャンプする評価では、**開始前 `WINDOW_SIZE` 本の観測をLSTMに流して隠れ状態を温めてから取引開始**。全評価系（`_eval_one` / `_eval_ensemble` / `run_simulation` / `visualize`）がこれを使用 | `main.warmup_lstm_state` / `main.rollout` |
 | 検証選抜のLSTM文脈 | 学習中の checkpoint 選抜も同条件に統一。標準 `EvalCallback`（ゼロ状態で検証窓を走る）を **`WarmupEvalCallback`**（`rollout` と同じ warmup 手順で1エピソード評価）に置換。「選抜時の条件 = 使用時の条件」になった | `main.WarmupEvalCallback` |
+| LR・clip range の線形減衰 | PPO常套手段の **linear decay** を導入（初期値→0, `TOTAL_TIMESTEPS` 基準）。終盤の破壊的更新・方策の暴れを抑える。`LR_SCHEDULE` / `CLIP_RANGE_SCHEDULE` = `"constant"` で従来の固定に戻せる | `algo._linear_schedule` / `config.py` |
 
 パイプラインは通し確認済み（短い学習 → 複数窓評価 → アンサンブル → 単日シミュレーション）。
 **本学習（500kステップ・複数シード）はまだ回していない。**

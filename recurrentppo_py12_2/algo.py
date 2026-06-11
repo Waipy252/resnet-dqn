@@ -25,6 +25,20 @@ def get_algo_class():
     return PPO
 
 
+def _linear_schedule(initial):
+    """progress_remaining(1→0) に比例して initial→0 へ線形減衰するスケジュール。"""
+
+    def schedule(progress_remaining: float) -> float:
+        return progress_remaining * initial
+
+    return schedule
+
+
+def _scheduled(value, kind):
+    """kind=="linear" なら線形減衰の callable、それ以外は定数のまま返す。"""
+    return _linear_schedule(value) if kind == "linear" else value
+
+
 def build_model(env, device, tensorboard_log=config.TENSORBOARD_LOG, seed=None):
     """config の設定に従って学習器を構築する。
 
@@ -53,13 +67,14 @@ def build_model(env, device, tensorboard_log=config.TENSORBOARD_LOG, seed=None):
         policy,
         env,
         policy_kwargs=policy_kwargs,
-        learning_rate=config.LEARNING_RATE,
+        # 線形減衰（PPO常套手段）: 終盤の破壊的更新を抑える。config.*_SCHEDULE で切替
+        learning_rate=_scheduled(config.LEARNING_RATE, config.LR_SCHEDULE),
         n_steps=config.N_STEPS,
         batch_size=config.BATCH_SIZE,
         n_epochs=config.N_EPOCHS,
         gamma=config.GAMMA,
         gae_lambda=config.GAE_LAMBDA,
-        clip_range=config.CLIP_RANGE,
+        clip_range=_scheduled(config.CLIP_RANGE, config.CLIP_RANGE_SCHEDULE),
         ent_coef=config.ENT_COEF,
         vf_coef=config.VF_COEF,
         max_grad_norm=config.MAX_GRAD_NORM,

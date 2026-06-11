@@ -116,6 +116,7 @@ docs/
 | `LSTM_HIDDEN` / `LSTM_LAYERS` | 128 / 1 | 内蔵LSTMのサイズ |
 | `WEIGHT_DECAY` | 1e-4 | G-2: AdamのL2正則化 |
 | `N_STEPS` / `BATCH_SIZE` / `N_EPOCHS` | 2048 / 256 / 10 | PPO rollout・ミニバッチ |
+| `LR_SCHEDULE` / `CLIP_RANGE_SCHEDULE` | `linear` | 学習率・clip range の線形減衰（`constant` で固定。減衰は `TOTAL_TIMESTEPS` 基準） |
 | `ENT_COEF` | 0.01 | エントロピーボーナス（様子見への早期収束を防ぐ） |
 | `TOTAL_TIMESTEPS` | 500,000 | 学習ステップ数（早期停止前提） |
 | `EVAL_FREQ` / `EARLY_STOP_PATIENCE` | 10000 / 6 | 検証頻度・早期停止 |

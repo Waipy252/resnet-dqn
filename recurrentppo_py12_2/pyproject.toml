@@ -10,7 +10,6 @@ dependencies = [
     "gym-notices==0.1.0",
     "gymnasium==1.2.0",
     "pandas<3.0",
-    "pandas-datareader>=0.10.0",
     "plotly>=6.6.0",
     "sb3-contrib>=2.8.0",
     "shimmy>=2.0.0",

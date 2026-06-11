@@ -12,7 +12,7 @@
 | 項目 | 変更内容 |
 |---|---|
 | **G-1: アルゴリズム** | QR-DQN → **RecurrentPPO**（`sb3-contrib`）。オンポリシーで安定。`config.ALGO="ppo"` で通常PPOにも切替可 |
-| **G-1: 観測** | 「130日×29特徴のwindow」→ **1日1ベクトル（17特徴＋ポジションone-hot 3）**。時系列の記憶は内蔵LSTMに任せる。取引コストがあるため現在ポジションを観測に明示。σバンド12本は偏差値25/75と線形冗長なため間引き |
+| **G-1: 観測** | 「130日×29特徴のwindow」→ **1日1ベクトル（29特徴＋ポジションone-hot 3）**。時系列の記憶は内蔵LSTMに任せる。取引コストがあるため現在ポジションを観測に明示 |
 | **B-3: 正規化** | ウィンドウ内MinMax（絶対水準破壊・基準ズレ）を廃止 → **リターン化/相対化＋ローリング・ロバスト z-score**（中央値/MAD・因果的・±5クリップ） |
 | **G-2: 正則化** | optimizer に **weight decay**（`config.WEIGHT_DECAY`）を適用 |
 | **G-3: 評価** | `_eval_one.py` が **複数OOS窓**（コロナ/軟調/bull, `config.EVAL_WINDOWS`）で **窓ごとに B&H と比較**し、「全窓でエッジが有るか」を判定 |
@@ -74,7 +74,7 @@ uv run python visualize.py        # モデル性能の可視化（Gradio, http:/
 uv run python server.py           # 単日シミュレーション（Gradio, http://localhost:8888）
 ```
 
-`server.py` は「📥 最新データ自動取得」ボタンで yfinance/FRED から当日OHLC・VIX・金利を自動入力できる（F-4）。手打ちは上書き用途。
+`server.py` は「📥 最新データ自動取得」ボタンで yfinance/財務省CSV から当日OHLC・VIX・金利を自動入力できる（F-4）。手打ちは上書き用途。
 
 ### 4. Docker
 
@@ -88,7 +88,7 @@ docker compose up --build         # visualize を起動 → http://localhost:130
 
 ```
 config.py            ハイパーパラメータ・期間設定の一元管理（全スクリプトが import）
-data.py              yfinance/FRED からデータ取得＋テクニカル指標（generate_env_data / fetch_latest）
+data.py              yfinance/財務省CSV からデータ取得＋テクニカル指標（generate_env_data / fetch_latest）
 main.py              NikkeiEnv（1日1ベクトル観測＋ロバストz正規化）/ rollout / 学習エントリポイント
 algo.py              config.ALGO に応じて RecurrentPPO / PPO を構築（build_model）
 calc_performance.py  シャープ・年利・最大DD・勝率などの指標計算

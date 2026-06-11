@@ -39,9 +39,9 @@ def run_simulation(open_, high, low, close, volume, end_day, vix, jpy, usr):
 
 
 def autofill_latest(current_jpy):
-    """F-4: yfinance / FRED から最新OHLC・VIX・金利を取得してフォームを埋める。
+    """F-4: yfinance / 財務省CSV から最新OHLC・VIX・金利を取得してフォームを埋める。
 
-    日本10年金利（FRED月次）が取れなかった場合のみ、現在の入力値を残す。
+    日本10年金利（財務省・日次）が取れなかった場合のみ、現在の入力値を残す。
     """
     try:
         latest = fetch_latest()

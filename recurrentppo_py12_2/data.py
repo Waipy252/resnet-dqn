@@ -1,7 +1,49 @@
-import pandas_datareader.data as web
+import re
+
 import yfinance as yf
 import pandas as pd
 import numpy as np
+
+# 財務省「国債金利情報」（日次・終値ベース）。jgbcm_all は過去分全量、jgbcm は当月分。
+_JGB_ALL_URL = "https://www.mof.go.jp/jgbs/reference/interest_rate/data/jgbcm_all.csv"
+_JGB_RECENT_URL = "https://www.mof.go.jp/jgbs/reference/interest_rate/jgbcm.csv"
+_WAREKI_BASE = {"S": 1925, "H": 1988, "R": 2018}  # 元号 → 西暦オフセット（元年=+1）
+
+
+def _wareki_to_timestamp(s):
+    """財務省CSVの元号日付（例 S49.9.24 / H1.1.4 / R8.6.10）を Timestamp に変換。"""
+    m = re.match(r"^([SHR])(\d+)\.(\d+)\.(\d+)$", str(s).strip())
+    if not m:
+        return pd.NaT
+    year = _WAREKI_BASE[m.group(1)] + int(m.group(2))
+    return pd.Timestamp(year, int(m.group(3)), int(m.group(4)))
+
+
+def fetch_jp_10y(end=None):
+    """日本10年金利（日次）を財務省CSVから取得して Series で返す。
+
+    旧実装の FRED IRLTLT01JPM156N（月平均）＋日次線形補間は
+    ①補間が翌月の値を参照 ②月平均自体が月内の未来日を含む ③公表ラグ、
+    の3点で未来参照だった。MOF の日次終値（当日夕方公表）ならその問題がない。
+    """
+    frames = []
+    for url in (_JGB_ALL_URL, _JGB_RECENT_URL):
+        try:
+            raw = pd.read_csv(url, encoding="cp932", skiprows=1)
+            dates = raw["基準日"].map(_wareki_to_timestamp)
+            vals = pd.to_numeric(raw["10年"], errors="coerce")
+            frames.append(pd.Series(vals.to_numpy(), index=dates))
+        except Exception as e:
+            print(f"JGB金利CSVの取得に失敗（{url}）: {e}")
+    if not frames:
+        raise RuntimeError("日本10年金利を取得できませんでした")
+    s = pd.concat(frames)
+    s = s[s.index.notna()].dropna()
+    s = s[~s.index.duplicated(keep="last")].sort_index()
+    s.name = "Japan_10Y_Rate"
+    if end is not None:
+        s = s.loc[: pd.Timestamp(end)]
+    return s
 
 
 def generate_env_data(start, end, ticker="JPY=X", manual_data=None, save_csv=False):
@@ -39,8 +81,6 @@ def generate_env_data(start, end, ticker="JPY=X", manual_data=None, save_csv=Fal
     except Exception as e:
         print(f"当日データの補完に失敗（取得済みデータのみで継続）: {e}")
 
-    date_range = pd.date_range(start=start, end=end, freq="D")
-
     # -------------------------
     # 米国10年債利回り（A-2 / F-3）
     # FEDFUNDS（FF金利・月次）ではなく ^TNX（CBOE 10年債利回り・日次）を使用。
@@ -55,12 +95,11 @@ def generate_env_data(start, end, ticker="JPY=X", manual_data=None, save_csv=Fal
 
     # -------------------------
     # 日本10年債利回り（F-3）
-    # FRED IRLTLT01JPM156N は月次。日次 reindex 後、階段状を避けるため線形補間。
+    # 財務省「国債金利情報」の日次終値。旧 FRED 月次平均＋線形補間は
+    # 未来参照（翌月値での補間・月平均・公表ラグ）だったため置換した。
+    # 行への割り当ては米国系列と同じく下の asof(t-1日) ブロックで行う。
     # -------------------------
-    jp_rate = web.DataReader("IRLTLT01JPM156N", "fred", start, end)
-    jp_rate.rename(columns={"IRLTLT01JPM156N": "Japan_10Y_Rate"}, inplace=True)
-    jp_rate.index.name = "Date"
-    jp_rate = jp_rate.reindex(date_range).interpolate(method="linear").ffill().bfill()
+    jp_series = fetch_jp_10y(end=end)
 
     # 3. アメリカの恐怖指数 VIX のデータを取得（終値を使用）
     # ここではダウンロードだけ行い、行への割り当ては manual_data 結合後に
@@ -71,9 +110,6 @@ def generate_env_data(start, end, ticker="JPY=X", manual_data=None, save_csv=Fal
         vix_data.index = vix_data.index.tz_localize(None)
     vix_series = pd.to_numeric(vix_data["Close"], errors="coerce").dropna()
 
-    test_data = pd.merge(
-        test_data, jp_rate, left_index=True, right_index=True, how="left"
-    )
     # 手動データがある場合は追加（F-4: fetch_latest の実OHLC行を想定。
     # 指標は Open のみから計算するので Open さえ正しければ歪みは出ない）
     if manual_data is not None:
@@ -84,30 +120,43 @@ def generate_env_data(start, end, ticker="JPY=X", manual_data=None, save_csv=Fal
         test_data = pd.concat([test_data, manual_data]).sort_index()
 
     # -------------------------
-    # 米国系列（VIX・米10年金利）のリーク防止
+    # 外部系列（VIX・米10年金利・日本10年金利）のリーク防止
     # 「米国時間dの終値」が確定するのは日本時間d+1の早朝なので、
     # 日本の寄付きtの時点で使えるのは暦日t-1以前の米国終値だけ。
     # 行tに同日tの終値を入れる（旧実装）と寄付き判断には未来情報になるため、
     # 各行tには asof(t-1日)＝t-1以前で最新の終値を入れる。
-    # manual_data の行も含めて一括で上書きする（手動行のVIX等も同様に揃う）。
+    # 日本10年金利も MOF 終値の公表は当日夕方なので、寄付きで使えるのは前日分。
+    # manual_data の行も含めて一括で上書きする（手動行のVIX・金利も同様に揃う）。
     # -------------------------
     us_series = pd.to_numeric(us_10y["US_10Y_Rate"], errors="coerce").dropna()
     prev_day = test_data.index - pd.Timedelta(days=1)
     test_data["VIX"] = vix_series.asof(prev_day).to_numpy()
     test_data["US_10Y_Rate"] = us_series.asof(prev_day).to_numpy()
+    test_data["Japan_10Y_Rate"] = jp_series.asof(prev_day).to_numpy()
 
     # テクニカル指標の計算（例ではOpenを使用）
     test_data["SMA_5"] = test_data["Open"].rolling(window=5).mean()
     test_data["SMA_25"] = test_data["Open"].rolling(window=25).mean()
     test_data["SMA_75"] = test_data["Open"].rolling(window=75).mean()
-    # σバンド（Upper/Lower 1〜3σ）は偏差値と線形冗長なため生成しない。
-    # バンド位置の情報は 偏差値25/75 = 50 + 10·(Open−SMA)/STD に集約。
+    # σバンド（ボリンジャーバンド: Upper/Lower 1〜3σ × 25/75日）
     test_data["STD_25"] = test_data["Open"].rolling(window=25).std()
+    test_data["Upper_3σ"] = test_data["SMA_25"] + 3 * test_data["STD_25"]
+    test_data["Lower_3σ"] = test_data["SMA_25"] - 3 * test_data["STD_25"]
+    test_data["Upper_2σ"] = test_data["SMA_25"] + 2 * test_data["STD_25"]
+    test_data["Lower_2σ"] = test_data["SMA_25"] - 2 * test_data["STD_25"]
+    test_data["Upper_1σ"] = test_data["SMA_25"] + 1 * test_data["STD_25"]
+    test_data["Lower_1σ"] = test_data["SMA_25"] - 1 * test_data["STD_25"]
     test_data["偏差値25"] = 50 + 10 * (
         (test_data["Open"] - test_data["SMA_25"]) / test_data["STD_25"]
     )
 
     test_data["STD_75"] = test_data["Open"].rolling(window=75).std()
+    test_data["Upper2_3σ"] = test_data["SMA_75"] + 3 * test_data["STD_75"]
+    test_data["Lower2_3σ"] = test_data["SMA_75"] - 3 * test_data["STD_75"]
+    test_data["Upper2_2σ"] = test_data["SMA_75"] + 2 * test_data["STD_75"]
+    test_data["Lower2_2σ"] = test_data["SMA_75"] - 2 * test_data["STD_75"]
+    test_data["Upper2_1σ"] = test_data["SMA_75"] + 1 * test_data["STD_75"]
+    test_data["Lower2_1σ"] = test_data["SMA_75"] - 1 * test_data["STD_75"]
     test_data["偏差値75"] = 50 + 10 * (
         (test_data["Open"] - test_data["SMA_75"]) / test_data["STD_75"]
     )
@@ -173,7 +222,7 @@ def fetch_latest(ticker="^N225"):
 
     戻り値 dict:
         date(YYYY-MM-DD), open, high, low, close, volume, vix, us_10y, jp_10y
-        jp_10y は FRED が月次のため直近値（取得失敗時は None → 手入力で補完）。
+        jp_10y は財務省CSVの直近日次値（取得失敗時は None → 手入力で補完）。
     """
     px = yf.Ticker(ticker).history(period="5d")
     if px.empty:
@@ -188,11 +237,9 @@ def fetch_latest(ticker="^N225"):
     vix = _last_close("^VIX")
     us_10y = _last_close("^TNX")
 
-    # 日本10年金利は FRED 月次系列の直近値（低頻度なので近似でよい）
+    # 日本10年金利は財務省CSVの直近日次値（前営業日分まで公表される）
     try:
-        today = pd.Timestamp.today()
-        jp = web.DataReader("IRLTLT01JPM156N", "fred", today - pd.Timedelta(days=180), today)
-        jp_10y = float(jp.dropna().iloc[-1, 0])
+        jp_10y = float(fetch_jp_10y().iloc[-1])
     except Exception as e:
         print(f"日本10年金利の取得に失敗（手入力で補完してください）: {e}")
         jp_10y = None

@@ -35,8 +35,7 @@ class NikkeiEnv(gym.Env):
     qrdqn_py12 からの変更点:
     - 観測（G-1）: 「window×特徴」の2次元から **1日1ベクトル** に変更。
       時系列の記憶は RecurrentPPO の内蔵LSTMに任せる。
-      観測 = 正規化済み特徴(17) ＋ 現在ポジションの one-hot(3)。
-      （σバンド12本は偏差値25/75と冗長なため間引き済み → FEATURE_TRANSFORMS）
+      観測 = 正規化済み特徴(29) ＋ 現在ポジションの one-hot(3)。
       （取引コストがあるため最適行動は現在ポジションに依存する。LSTMは自分の行動を
         観測できないので、ポジションを明示的に観測へ入れる。）
     - 正規化（B-3）: ウィンドウ内MinMax を廃止。
@@ -56,14 +55,24 @@ class NikkeiEnv(gym.Env):
     # 特徴量ごとの定常化方法（B-3）。
     # "logdiff": 対数差分 / "rel_open": Open比-1 / "div_open": Open割り /
     # "log": 対数 / "scale100": 1/100 / "raw": そのまま → いずれも後段でロバストz。
-    # σバンド12本（Upper/Lower 1〜3σ × 25/75日）は (Open−SMA)/STD の線形変換
-    # どうしでほぼ完全相関のため観測から除外し、偏差値25/75 に集約（29本→17本）。
     FEATURE_TRANSFORMS = {
         "Open": "logdiff",
         "SMA_5": "rel_open",
         "SMA_25": "rel_open",
         "SMA_75": "rel_open",
+        "Upper_3σ": "rel_open",
+        "Upper_2σ": "rel_open",
+        "Upper_1σ": "rel_open",
+        "Lower_3σ": "rel_open",
+        "Lower_2σ": "rel_open",
+        "Lower_1σ": "rel_open",
         "偏差値25": "raw",
+        "Upper2_3σ": "rel_open",
+        "Upper2_2σ": "rel_open",
+        "Upper2_1σ": "rel_open",
+        "Lower2_3σ": "rel_open",
+        "Lower2_2σ": "rel_open",
+        "Lower2_1σ": "rel_open",
         "偏差値75": "raw",
         "RSI_14": "scale100",
         "RSI_22": "scale100",

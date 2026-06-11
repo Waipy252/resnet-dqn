@@ -17,6 +17,7 @@
 | **F-4** 当日データ投入 | `data.fetch_latest()`（yfinance/FRED で最新OHLC・VIX・金利）＋ `server.py` の「📥 最新データ自動取得」ボタン。手打ちは上書き用途に限定 | `data.py` / `server.py` |
 | **D-2** 合成行のATR歪み | F-4 と同時解消。manual_data を実OHLC行で延長（High=Low=Open の合成行を廃止）。重複日付は手動データ優先 | `data.py generate_env_data` / `run_simulation.py` |
 | 評価時のLSTM文脈 | OOS開始位置へジャンプする評価では、**開始前 `WINDOW_SIZE` 本の観測をLSTMに流して隠れ状態を温めてから取引開始**。全評価系（`_eval_one` / `_eval_ensemble` / `run_simulation` / `visualize`）がこれを使用 | `main.warmup_lstm_state` / `main.rollout` |
+| 検証選抜のLSTM文脈 | 学習中の checkpoint 選抜も同条件に統一。標準 `EvalCallback`（ゼロ状態で検証窓を走る）を **`WarmupEvalCallback`**（`rollout` と同じ warmup 手順で1エピソード評価）に置換。「選抜時の条件 = 使用時の条件」になった | `main.WarmupEvalCallback` |
 
 パイプラインは通し確認済み（短い学習 → 複数窓評価 → アンサンブル → 単日シミュレーション）。
 **本学習（500kステップ・複数シード）はまだ回していない。**
@@ -35,7 +36,8 @@
 
 ### N-2. 検証選抜のレジーム不一致への対処
 - qrdqn_py12 で観測した根本問題: val(2022-06〜2024-01, 軟調) と test(bull) の地合い不一致で、検証ベスト選抜が test で機能しない。
-- 本版でも `EvalCallback` は同じ val 窓なので**問題は未解決のまま持ち越し**。
+- 前提条件のズレ（選抜はゼロLSTM状態・本番はwarmup済み）は `WarmupEvalCallback` で解消済み（上表）。
+- ただし val 窓が軟調1窓のままという**地合い不一致の本体は未解決のまま持ち越し**。
 - 候補:
   - 検証窓を複数（軟調＋上昇の2窓）にして平均スコアで選抜する EvalCallback 拡張。
   - 検証指標を「対B&H超過のシャープ（情報レシオ）」にする（地合いに不変な指標で選ぶ）。

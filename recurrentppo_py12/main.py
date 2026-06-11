@@ -1,3 +1,4 @@
+import os
 from enum import IntEnum
 
 import numpy as np
@@ -441,6 +442,76 @@ def rollout(model, env, deterministic=True, lstm_warmup=True):
     return actions, env.get_equity_curve()
 
 
+class WarmupEvalCallback(EvalCallback):
+    """LSTM warmup 付きの EvalCallback（N-2 の前提修正）。
+
+    標準の evaluate_policy はゼロ状態のまま検証窓を走るため、本番評価系
+    （rollout: トレード開始前に WINDOW_SIZE 本の観測を流して隠れ状態を温める）と
+    条件がズレ、checkpoint 選抜が本番と違う土俵で行われていた。
+    ここでは rollout と全く同じ手順で検証エピソードを実行し、
+    「選抜時の条件 = 使用時の条件」に揃える。
+
+    検証 env・方策とも決定論的なので n_eval_episodes は常に 1。
+    best model 保存・evaluations.npz・callback_after_eval（早期停止）の挙動は
+    親クラスと同じ。
+    """
+
+    def __init__(self, eval_env, **kwargs):
+        # 親は eval_env を VecEnv に包んで保持するが、評価は raw env + rollout で行う
+        self._raw_eval_env = eval_env
+        kwargs.pop("n_eval_episodes", None)
+        super().__init__(eval_env, n_eval_episodes=1, **kwargs)
+
+    def _on_step(self) -> bool:
+        continue_training = True
+
+        if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
+            env = self._raw_eval_env
+            rollout(self.model, env, deterministic=self.deterministic)
+            episode_reward = float(env.sum_reward)
+            episode_length = int(env.num_step)
+
+            if self.log_path is not None:
+                self.evaluations_timesteps.append(self.num_timesteps)
+                self.evaluations_results.append([episode_reward])
+                self.evaluations_length.append([episode_length])
+                np.savez(
+                    self.log_path,
+                    timesteps=self.evaluations_timesteps,
+                    results=self.evaluations_results,
+                    ep_lengths=self.evaluations_length,
+                )
+
+            self.last_mean_reward = episode_reward
+            if self.verbose >= 1:
+                print(
+                    f"Eval(warmup) num_timesteps={self.num_timesteps}, "
+                    f"episode_reward={episode_reward:.2f}, "
+                    f"final_balance={int(env.balance)}, trades={env.trade_count}"
+                )
+            self.logger.record("eval/mean_reward", episode_reward)
+            self.logger.record("eval/mean_ep_length", float(episode_length))
+            self.logger.record("eval/final_balance", float(env.balance))
+            self.logger.record("eval/trade_count", float(env.trade_count))
+            self.logger.record("time/total_timesteps", self.num_timesteps, exclude="tensorboard")
+            self.logger.dump(self.num_timesteps)
+
+            if episode_reward > self.best_mean_reward:
+                if self.verbose >= 1:
+                    print("New best mean reward!")
+                if self.best_model_save_path is not None:
+                    self.model.save(os.path.join(self.best_model_save_path, "best_model"))
+                self.best_mean_reward = episode_reward
+                if self.callback_on_new_best is not None:
+                    continue_training = self.callback_on_new_best.on_step()
+
+            # callback_after_eval（早期停止）をトリガー
+            if self.callback is not None:
+                continue_training = continue_training and self._on_event()
+
+        return continue_training
+
+
 def prepare_train_val_data(full=None):
     """in-sampleデータを 学習(VAL_START未満) と 検証(warmup付き) に分割。
 
@@ -460,22 +531,21 @@ def make_eval_callback(val_df, best_dir):
 
     報酬がDSRなので、1エピソードのDSR合計 ≒ 検証期間のシャープに相当し、
     これを最大化するモデルを「検証ベスト」として選ぶ＝過学習前で止める。
-    （EvalCallback の evaluate_policy は RecurrentPPO の LSTM状態を内部で扱える）
+    評価は WarmupEvalCallback（rollout と同じ LSTM warmup 手順）で行い、
+    checkpoint 選抜と本番評価の条件を一致させる。
     """
-    import os
     os.makedirs(best_dir, exist_ok=True)
-    val_env = DummyVecEnv([lambda: make_env(val_df, trade_start_date=config.VAL_START)])
+    val_env = make_env(val_df, trade_start_date=config.VAL_START)
     stop = StopTrainingOnNoModelImprovement(
         max_no_improvement_evals=config.EARLY_STOP_PATIENCE,
         min_evals=config.EARLY_STOP_MIN_EVALS,
         verbose=1,
     )
-    return EvalCallback(
+    return WarmupEvalCallback(
         val_env,
         best_model_save_path=best_dir,
         log_path=best_dir,
         eval_freq=config.EVAL_FREQ,
-        n_eval_episodes=1,
         deterministic=True,
         callback_after_eval=stop,
         verbose=1,
@@ -484,7 +554,7 @@ def make_eval_callback(val_df, best_dir):
 
 def save_best_or_last(model, best_dir, out_path):
     """検証ベスト(best_model.zip)があればそれを out_path にコピー、無ければ最終モデルを保存。"""
-    import os, shutil
+    import shutil
     best = os.path.join(best_dir, "best_model.zip")
     if os.path.exists(best):
         shutil.copy(best, out_path + ".zip")
@@ -495,7 +565,6 @@ def save_best_or_last(model, best_dir, out_path):
 
 
 if __name__ == "__main__":
-    import os
     import sys
 
     # C-2: 再現性のためシード固定。ただしアンサンブル用に実行ごとに変えられるよう、

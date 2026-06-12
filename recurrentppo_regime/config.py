@@ -17,19 +17,19 @@ recurrentppo_py12_2 からの主な変更（本プロジェクト recurrentppo_r
 
 # ── データ ──────────────────────────────
 TICKER = "^N225"
-TRAIN_START = "1997-01-01"
-TRAIN_END = "2020-01-01"  # in-sample データの終端（≒最新）＝モデル名にも使用
+TRAIN_START = "1997-01-01" #"1997-01-01"
+TRAIN_END = "2026-01-01"  # in-sample データの終端（≒最新）＝モデル名にも使用
 
 # 学習/検証 分割（早期停止用）。学習はVAL_STARTまで、検証はVAL_START→TRAIN_END。
 # 注意: 検証が最新期間まで及ぶため、純OOSのテスト期間は存在しない構成。
-VAL_START = "2020-01-01"        # ここから先は学習に使わず検証に回す
-VAL_WARMUP_START = "2018-06-01"  # 検証env の正規化warmup用にこの辺りからデータを渡す
+VAL_START = "2024-01-01"        # ここから先は学習に使わず検証に回す
+VAL_WARMUP_START = "2022-01-01"  # 検証env の正規化warmup用にこの辺りからデータを渡す
 
 # ── 環境 ────────────────────────────────
 # WINDOW_SIZE は「観測ウィンドウ」ではなく warmup バー数になった（G-1）。
 # 観測は1日1ベクトル（LSTMが時系列を記憶する）。トレード開始前に最低この本数の
 # 履歴を確保し、評価時は同じ本数の観測を LSTM に流して隠れ状態を温める。
-WINDOW_SIZE = 130
+WINDOW_SIZE = 504
 INITIAL_BALANCE = 1_000_000
 TRANSACTION_COST = 0.001  # 学習・評価で統一（往復スプレッド+手数料想定, A-4）
 RISK_LIMIT = 0.5          # 初期資産の RISK_LIMIT 未満で終了（学習・評価で統一）
@@ -82,7 +82,7 @@ OBS_CLIP = 5.0        # z-score のクリップ幅
 # "volnorm": ボラ正規化 logret（DSR-lite）。reward = r / max(σ_ema, √DSR_VAR_FLOOR)。
 #            DSR のリスク調整の核だけ残し不安定な微分項を捨てた版。分母が復活するので
 #            warmup 中は報酬0・±DSR_CLIP でクリップ（DSR と同じ安定化を流用）。
-REWARD_TYPE = "logret"
+REWARD_TYPE = "risk"
 RISK_LAMBDA = 2.0    # risk: 2次ペナルティの強さ（1〜10目安）
 ASYM_KAPPA = 2.0     # asym: 損失側の倍率（1.5〜3目安, 1で logret に退化）
 DD_LAMBDA = 2.0      # ddpen: DD増分ペナルティの強さ（1〜5目安, 0で logret に退化）
@@ -106,7 +106,7 @@ WEIGHT_DECAY = 1e-4       # G-2: 過学習対策（AdamのL2正則化）
 
 # ── 学習（PPO ハイパーパラメータ）──────────────
 SEED = 42                 # 再現性（C-2）
-TOTAL_TIMESTEPS = 300_000  # PPOはオフポリシーよりサンプル効率が低いので多め（早期停止前提）
+TOTAL_TIMESTEPS = 1_000_000  # PPOはオフポリシーよりサンプル効率が低いので多め（早期停止前提）
 LEARNING_RATE = 3e-4
 # 線形減衰スケジュール（PPOの常套手段。終盤の方策の暴れ・破壊的更新を抑える）。
 # "linear": progress_remaining(1→0) に比例して 初期値→0 へ線形減衰 / "constant": 固定。
@@ -128,7 +128,7 @@ MAX_GRAD_NORM = 0.5
 # 検証スコア(EvalCallback)が頭打ちになったら学習を止め、検証ベスト版を保存する。
 EVAL_FREQ = 10000         # 何ステップごとに検証するか
 EARLY_STOP_PATIENCE = 6    # この回数連続で改善しなければ停止（6×EVAL_FREQ=60kステップ）
-EARLY_STOP_MIN_EVALS = 5   # 最低この回数は評価してから停止判定
+EARLY_STOP_MIN_EVALS = 90   # 最低この回数は評価してから停止判定
 
 # ── 評価（G-3: 複数OOS窓）────────────────────
 # 地合いの異なる窓ごとに B&H と比較してエッジの有無を判定する。

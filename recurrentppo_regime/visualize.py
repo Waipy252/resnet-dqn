@@ -49,7 +49,7 @@ def _steps_from_path(path):
     if len(parts) == 3 and parts[2] == "steps" and parts[1].isdigit():
         return f"{tag}{int(parts[1])}" if tag else int(parts[1])
     # リネーム済みモデルは共通プレフィックスを剥がして短く（_eval_one.py と同じ流儀）
-    m = re.match(r"nikkei_rppo_\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}_?(.+)", stem)
+    m = re.match(r"nikkei_\w+_\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}_?(.+)", stem)
     return f"{tag}{m.group(1)}" if m else stem
 
 
@@ -60,7 +60,9 @@ def discover_models(pattern=None):
     リネーム済みのベストモデルも対象にする。
     """
     if pattern is None:
-        pattern = "nikkei_rppo_*.zip"
+        # R-1: レジーム版（nikkei_regime_*）も旧名（nikkei_rppo_*）も拾う。
+        # 観測次元が違う旧モデルはロード時に弾かれるので、置かないのが前提。
+        pattern = "nikkei_*.zip"
     return sorted(glob.glob(pattern), key=lambda p: str(_steps_from_path(p)))
 
 
@@ -92,7 +94,7 @@ def evaluate_all_models(ticker="^N225", start="2000-01-01", end="2010-01-01"):
 
     model_paths = discover_models()
     if not model_paths:
-        print("モデルzipが見つかりません（nikkei_rppo_*.zip）")
+        print("モデルzipが見つかりません（nikkei_*.zip）")
     for model_path in model_paths:
         i = _steps_from_path(model_path)
         try:
@@ -151,8 +153,9 @@ def evaluate_all_models(ticker="^N225", start="2000-01-01", end="2010-01-01"):
 def create_performance_comparison(results):
     """モデル性能比較グラフを作成"""
 
+    # gr.Plot に文字列を返すと postprocess で落ちるため、空のときは None
     if not results:
-        return "No model results available"
+        return None
 
     df = pd.DataFrame(results)
 
@@ -302,8 +305,9 @@ def create_summary_stats(results):
 def create_action_distribution(results):
     """アクション分布の可視化"""
 
+    # gr.Plot に文字列を返すと postprocess で落ちるため、空のときは None
     if not results:
-        return "No model results available"
+        return None
 
     df = pd.DataFrame(results)
 
@@ -554,8 +558,9 @@ def create_equity_curves_with_ensemble(
 ):
     """全モデルのエクイティカーブとアンサンブルを表示し、アンサンブル性能も返す"""
 
+    # 1要素目は gr.Plot 行きなので文字列ではなく None（モデル未発見の旨は2要素目に）
     if not results:
-        return "No model results available", "", pd.DataFrame()
+        return None, "モデルzipが見つかりません（nikkei_*.zip を置いてください）", pd.DataFrame()
 
     # 銘柄の価格データを取得
     test_data = generate_env_data(start, end, ticker=ticker)

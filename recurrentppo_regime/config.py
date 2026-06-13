@@ -82,7 +82,7 @@ OBS_CLIP = 5.0        # z-score のクリップ幅
 # "volnorm": ボラ正規化 logret（DSR-lite）。reward = r / max(σ_ema, √DSR_VAR_FLOOR)。
 #            DSR のリスク調整の核だけ残し不安定な微分項を捨てた版。分母が復活するので
 #            warmup 中は報酬0・±DSR_CLIP でクリップ（DSR と同じ安定化を流用）。
-REWARD_TYPE = "risk"
+REWARD_TYPE = "logret"
 RISK_LAMBDA = 2.0    # risk: 2次ペナルティの強さ（1〜10目安）
 ASYM_KAPPA = 2.0     # asym: 損失側の倍率（1.5〜3目安, 1で logret に退化）
 DD_LAMBDA = 2.0      # ddpen: DD増分ペナルティの強さ（1〜5目安, 0で logret に退化）
